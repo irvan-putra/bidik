@@ -8,6 +8,27 @@ case "$QUEUE_URL" in
   *) echo "queue_url must be a public https URL, got: $QUEUE_URL"; exit 1 ;;
 esac
 
+# Wait for full device readiness: adb answers before system_server has
+# every service up on this unaccelerated runner, and installing the test
+# APK then fails with "Can't find service: package" (observed run
+# 43677737595). Gate on boot_completed AND the package manager serving.
+echo "== wait for device readiness =="
+adb wait-for-device
+ready_deadline=$(( $(date +%s) + 420 ))
+while :; do
+  boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+  pmok=$(adb shell pm path android 2>/dev/null | head -1)
+  if [ "$boot" = "1" ] && [ -n "$pmok" ]; then
+    echo "device ready (boot_completed=1, package service up)"
+    break
+  fi
+  if [ "$(date +%s)" -ge "$ready_deadline" ]; then
+    echo "device not ready within 420s (boot_completed='$boot', pm='$pmok')" >&2
+    exit 1
+  fi
+  sleep 5
+done
+
 # Remove only CI-generated result/output folders so a previous run cannot
 # make a zero-test run appear healthy.
 rm -rf app/build/outputs/androidTest-results/connected
@@ -44,7 +65,7 @@ if [ $rc -ne 0 ]; then
   # Platform network errors (e.g. cleartext denial) name the real cause;
   # the generic test failure alone does not. Bounded to the last matches.
   echo "== filtered logcat: platform network/webview errors ==" >&2
-  adb logcat -d -b all | grep -iE 'cleartext|ERR_|net::|NetworkSecurity' | tail -50 >&2 || true
+  adb logcat -d -b all | grep -iE 'cleartext|ERR_|net::|NetworkSecurity' | sed -E 's#https?://[^ ]*#[url]#g' | tail -50 >&2 || true
   exit 1
 fi
 
