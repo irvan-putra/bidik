@@ -54,7 +54,10 @@ jobs:
           QUEUE_URL: ${{ inputs.queue_url }}
         with:
           api-level: 34
-          target: aosp
+          # v2.33.0 supports: default, google_apis, aosp_atd, google_atd,
+          # google_apis_playstore, android-wear(-cn), android-tv, google-tv.
+          # default = AOSP image, enough for a WebView capture check.
+          target: default
           arch: x86_64
           # ciAllAbis drops the arm64-only filter for the emulator; the
           # DeltaChat runtime is never started in this test.
