@@ -51,7 +51,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var listView: LinearLayout
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
-    private lateinit var setupBox: LinearLayout
+    internal lateinit var setupBox: LinearLayout
 
     private val qrScanner =
         registerForActivityResult(ScanContract()) { result ->
@@ -81,7 +81,13 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 8, 24, 16)
         }
-        root.addView(setupBox)
+        // The setup content (account, pairing, retention notes) can
+        // exceed the leftover screen on small phones; it must scroll or
+        // the lower rows are unreachable. Shares the leftover space with
+        // the queue list, which already scrolls.
+        val setupScroll = ScrollView(this)
+        setupScroll.addView(setupBox)
+        root.addView(setupScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
 
         renderSetup()
@@ -169,6 +175,9 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
+            })
+            setupBox.addView(TextView(this).apply {
+                text = "captures are archived per run on this phone and kept until the app's data is cleared"
             })
             return
         }

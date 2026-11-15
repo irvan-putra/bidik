@@ -52,4 +52,44 @@ class MainActivityRenderTest {
         FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         assertTrue("render missing: $out", out.exists() && out.length() > 5_000)
     }
+
+    @Test
+    fun setupContentIsScrollableAndFullyLaidOut() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        Thread.sleep(1500)
+        // The setup box must live inside a ScrollView: its content
+        // (account, pairing, retention notes) can exceed the leftover
+        // screen on small phones and would otherwise be unreachable.
+        assertTrue(
+            "setupBox must be wrapped in a ScrollView",
+            activity.setupBox.parent is android.widget.ScrollView
+        )
+        // Lay the setup content out at its full height and render it,
+        // proving every row - including the retention note at the
+        // bottom - is reachable by scrolling.
+        val box = activity.setupBox
+        val w = 540
+        box.measure(
+            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val h = box.measuredHeight
+        assertTrue("setup content suspiciously short: $h", h > 100)
+        // The retention note must be the LAST row so it is present in the
+        // unprovisioned state (the branch returns before pairing views).
+        val last = box.getChildAt(box.childCount - 1)
+        assertTrue(
+            "last setup row should be the retention note",
+            last is android.widget.TextView &&
+                (last as android.widget.TextView).text.contains("archived per run")
+        )
+        box.layout(0, 0, w, h)
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(android.graphics.Color.WHITE)
+        box.draw(Canvas(bmp))
+        val out = File("/tmp/mata-setup-full.png")
+        FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertTrue("render missing: $out", out.exists() && out.length() > 5_000)
+    }
 }
