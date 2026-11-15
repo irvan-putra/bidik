@@ -8,7 +8,8 @@ sends the captures back to a trusted contact you choose.
 queue syncs in, pages render and capture, results send back. The current
 stage is earlier than that: the capture pipeline (render, settle,
 screenshot) is implemented and unit-tested with an emulator pixel check
-wired up, but the messaging transport is NOT implemented or enabled yet.
+wired up. The messaging transport code exists (app side) but is NOT
+runtime-verified or enabled yet.
 Today the app reads its queue from a local file, runs captures from a
 manual button, and writes results locally. Nothing is sent anywhere
 automatically, and the automatic flow stays the goal, not a dropped
@@ -21,7 +22,7 @@ Feature status:
 | WebView capture (viewport + full-page) | implemented, emulator pixel check pending |
 | Queue list UI | implemented |
 | Local file queue/result transport | implemented (development path) |
-| DeltaChat transport (queue in, captures out) | not implemented; gated off pending pairing workflow |
+| DeltaChat transport (queue in, captures out) | app-side code present, no runtime verification; gated off pending pairing approval |
 | Real-Chrome capture mode | not planned for v1 |
 | Automatic queue sync + send-back | goal; blocked on transport |
 | In-app auto-update from releases | planned follow-up |

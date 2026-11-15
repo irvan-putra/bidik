@@ -4,11 +4,13 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import com.vanipy.mata.bot.DcQueueTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,12 +19,16 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * Whole screen is a concise queue list with no extra headings or filler.
- * One button runs the pass; status line at the bottom.
+ * Whole screen is the queue list: no headings, no filler.
  *
- * Transport pairing (trusted contact address, account setup) is an explicit
- * owner action from the overflow area - never automatic on first launch,
- * and disabled entirely in builds where TRANSPORT_ENABLED is false.
+ * Two stages:
+ * - Prototype (unpaired): local file transport, manual Run button.
+ * - Paired: on open the app syncs the queue from the paired contact and
+ *   runs the capture pass automatically - the target flow. The Run button
+ *   stays only as a manual re-run.
+ *
+ * Account creation and pairing are explicit user actions from the setup
+ * section; the app never creates an account on first launch.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -30,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var listView: LinearLayout
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
+    private lateinit var setupBox: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,21 +56,84 @@ class MainActivity : AppCompatActivity() {
         root.addView(progress)
         status = TextView(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(24, 8, 24, 8) }
         root.addView(status)
+        setupBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 16)
+        }
+        root.addView(setupBox)
         setContentView(root)
-        refreshList()
+
+        renderSetup()
+        if (SetupController.isPaired(this)) {
+            // Target flow: open -> sync -> capture -> send, no taps.
+            refreshList { runCapture() }
+        } else {
+            refreshList()
+        }
     }
 
     private fun currentTransport(): QueueTransport {
-        // Default: local transport (no account, no network beyond page loads).
-        // The DeltaChat-backed transport activates only after explicit owner
-        // setup and only in builds that enable it; see bot/BotService.
-        return LocalQueueTransport(filesDir)
+        val peer = SetupController.peerAddr(this)
+        return if (SetupController.isPaired(this) && peer != null) {
+            DcQueueTransport(this, peer)
+        } else {
+            LocalQueueTransport(filesDir)
+        }
     }
 
-    private fun refreshList() {
+    private fun renderSetup() {
+        setupBox.removeAllViews()
+        if (SetupController.isPaired(this)) {
+            setupBox.addView(TextView(this).apply {
+                text = "paired: ${SetupController.peerAddr(this@MainActivity)}"
+            })
+            return
+        }
+        val state = TextView(this)
+        setupBox.addView(state)
+        scope.launch {
+            val addr = SetupController.selfAddress(this@MainActivity)
+            state.text = if (addr != null) "messaging address: $addr" else "messaging not set up"
+        }
+        setupBox.addView(Button(this).apply {
+            text = "Create messaging account"
+            setOnClickListener { btn ->
+                btn.isEnabled = false
+                status.text = "creating messaging account..."
+                scope.launch {
+                    try {
+                        val addr = SetupController.provision(this@MainActivity, "nine.testrun.org")
+                        status.text = "account ready"
+                        state.text = "messaging address: $addr"
+                    } catch (e: Exception) {
+                        status.text = "account setup failed: ${e.message}"
+                        btn.isEnabled = true
+                    }
+                }
+            }
+        })
+        val peerField = EditText(this).apply { hint = "trusted contact address" }
+        setupBox.addView(peerField)
+        setupBox.addView(Button(this).apply {
+            text = "Pair"
+            setOnClickListener {
+                val addr = peerField.text.toString().trim()
+                if (addr.contains("@")) {
+                    SetupController.pair(this@MainActivity, addr)
+                    status.text = "paired"
+                    renderSetup()
+                    refreshList { runCapture() }
+                } else {
+                    status.text = "enter a full address to pair"
+                }
+            }
+        })
+    }
+
+    private fun refreshList(after: (() -> Unit)? = null) {
         scope.launch {
             val queue = try { currentTransport().fetchQueue() } catch (e: Exception) {
-                status.text = "queue read failed: ${e.message}"
+                status.text = "queue sync failed: ${e.message}"
                 emptyList()
             }
             listView.removeAllViews()
@@ -79,6 +149,7 @@ class MainActivity : AppCompatActivity() {
                     setPadding(24, 20, 24, 20)
                 })
             }
+            after?.invoke()
         }
     }
 
@@ -96,7 +167,9 @@ class MainActivity : AppCompatActivity() {
             }
             progress.visibility = View.GONE
             status.text = "done: ${outcome.ok} ok, ${outcome.failed} failed"
-            refreshList()
+            // Ledger: full success serves the queue; partial failure
+            // records only the failed pages for the next sync's retry.
+            (currentTransport() as? DcQueueTransport)?.finishRun(outcome.failedIds)
         }
     }
 

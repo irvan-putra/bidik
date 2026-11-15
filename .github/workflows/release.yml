@@ -50,8 +50,8 @@ jobs:
           [ "$IN_CODE" -gt "$cur_code" ] || { echo "versionCode $IN_CODE not above current $cur_code"; exit 1; }
           sed -i "s/versionName '.*'/versionName '$IN_NAME'/" app/build.gradle
           sed -i "s/versionCode .*/versionCode $IN_CODE/" app/build.gradle
-          # Badge the version onto the launcher icon (owner rule: every
-          # version visible on the icon, readable in the safe area).
+          # Badge the version onto the launcher icon, readable in the
+          # safe area.
           pip install pillow
           python3 tools/badge_icon.py "$IN_NAME"
           git config user.name "github-actions[bot]"

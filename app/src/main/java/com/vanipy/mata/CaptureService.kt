@@ -20,13 +20,19 @@ class CaptureRunner(
     private val transport: QueueTransport,
     private val outDir: File
 ) {
-    data class RunOutcome(val ok: Int, val failed: Int, val failures: List<String>)
+    data class RunOutcome(
+        val ok: Int,
+        val failed: Int,
+        val failures: List<String>,
+        val failedIds: List<String>
+    )
 
     suspend fun runOnce(): RunOutcome = withContext(Dispatchers.Main) {
         outDir.mkdirs()
         val queue = transport.fetchQueue()
         var ok = 0
         val failures = ArrayList<String>()
+        val failedIds = ArrayList<String>()
         val engine = WebViewCaptureEngine(activity)
         val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
         val device = JSONObject()
@@ -75,12 +81,13 @@ class CaptureRunner(
                 )
                 transport.sendResult(resultJson, emptyList())
                 failures.add("${job.id}: ${e.message}")
+                failedIds.add(job.id)
             }
         }
         transport.sendSummary(
             "capture run: $ok ok, ${failures.size} failed" +
                 if (failures.isNotEmpty()) "\n" + failures.joinToString("\n") else ""
         )
-        RunOutcome(ok, failures.size, failures)
+        RunOutcome(ok, failures.size, failures, failedIds)
     }
 }

@@ -5,11 +5,11 @@ import java.io.File
 /**
  * Transport interface between the app and the queue peer.
  *
- * The app is peer-agnostic: it talks to ONE trusted contact the owner
+ * The app is peer-agnostic: it talks to ONE trusted contact the user
  * configures at runtime (address entered in-app, never in source). This
  * interface deliberately hides which transport carries the messages; the
  * DeltaChat-backed implementation lives under bot/ and is gated behind
- * explicit owner setup (see TRANSPORT_ENABLED in BuildConfig wiring).
+ * explicit setup (see TRANSPORT_ENABLED in BuildConfig wiring).
  */
 interface QueueTransport {
     /** Latest queue from the peer; empty list when none is pending. */

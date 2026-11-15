@@ -30,7 +30,7 @@ import java.net.UnknownHostException
  *
  * No JavascriptInterface bridges are ever added: page JS gets no access
  * to app code. Fidelity is validated by instrumented pixel tests
- * (capture-check workflow) and finally on a physical phone, not assumed
+ * (capture-check workflow) and finally on a real device, not assumed
  * from settings alone.
  */
 class WebViewCaptureEngine(private val activity: Activity) {

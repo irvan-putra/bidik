@@ -7,11 +7,11 @@ import android.os.IBinder;
 /**
  * DeltaChat-backed transport service.
  *
- * GATED: never auto-starts. It runs only when the owner has explicitly
+ * GATED: never auto-starts. It runs only when the user has explicitly
  * completed transport setup in the app (pairing a trusted contact), which
  * is a deliberate action - the app creates no accounts on first launch and
  * public builds ship with the transport disabled until the pairing workflow
- * is approved. The chatmail account, when the owner creates one, is minted
+ * is approved. The chatmail account, when created, is minted
  * by an explicit button in the setup screen (same provisioning pattern as
  * itdapk's bot: dcaccount: relay QR, keys only in the app-private dir).
  *
