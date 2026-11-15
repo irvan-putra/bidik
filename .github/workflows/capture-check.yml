@@ -47,6 +47,17 @@ jobs:
           path: renders/
           retention-days: 14
           if-no-files-found: error
+      - name: Enable KVM (hardware acceleration) or stop
+        # Every prior run fell back to TCG ('Disabling Linux hardware
+        # acceleration' in the job logs). GitHub exposes /dev/kvm on
+        # standard Linux runners once the udev rule is in place
+        # (changelog 2024-04-02). Refuse a silent unaccelerated run.
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+          test -w /dev/kvm || { echo 'KVM unavailable to this job; refusing a silent TCG run' >&2; exit 1; }
       - name: Host capacity check (fits the AVD resource request?)
         run: |
           echo "nproc=$(nproc)"
@@ -67,10 +78,12 @@ jobs:
           ram-size: 4096
           # v2.33.0 supports: default, google_apis, aosp_atd, google_atd,
           # google_apis_playstore, android-wear(-cn), android-tv, google-tv.
-          # Stability lever after 4 consecutive system-server crashes on the
-          # default AOSP image: google_apis was the stable lead on this
-          # runner family (bounded: a lead, not a guarantee).
-          target: google_apis
+          # v2.33.0 supports: default, google_apis, aosp_atd, google_atd,
+          # google_apis_playstore, android-wear(-cn), android-tv, google-tv.
+          # Back to the default AOSP image (the only one that reached the
+          # capture stage) so the KVM step below is the single changed
+          # variable; google_apis made boot heavier (43696252614).
+          target: default
           arch: x86_64
           # Keep the action's headless/software-rendering defaults. Pin public
           # resolvers to test whether guest DNS forwarding caused the last run's
