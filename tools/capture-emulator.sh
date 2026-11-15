@@ -92,7 +92,9 @@ wait_ready 420
 # the pull, so failed runs (e.g. 43698674804's blank-capture assertion)
 # never uploaded the pixels that explain the failure.
 mkdir -p captures
-trap 'adb pull /sdcard/Android/data/com.vanipy.bidik/files/captures captures >/dev/null 2>&1 || true' EXIT
+# Trailing /. pulls the directory's CONTENTS (plain `pull dir dest` nests
+# dest/captures/ when dest exists - run 43702446360's gate missed that).
+trap 'adb pull /sdcard/Android/data/com.vanipy.bidik/files/captures/. captures >/dev/null 2>&1 || true' EXIT
 
 # Remove only CI-generated result/output folders so a previous run cannot
 # make a zero-test run appear healthy.
@@ -190,7 +192,7 @@ if ! run_instrumented com.vanipy.bidik.CapturePipelineTest /tmp/live-instrument.
 fi
 
 mkdir -p captures
-adb pull /sdcard/Android/data/com.vanipy.bidik/files/captures captures
+adb pull /sdcard/Android/data/com.vanipy.bidik/files/captures/. captures
 if ! find captures -type f -name '*.png' -print -quit | grep -q .; then
   echo "ERROR: emulator capture directory was empty or contained no PNG screenshots" >&2
   exit 1
