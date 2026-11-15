@@ -156,7 +156,13 @@ def _account_addr(acct):
 
 def _rpc(native_lib_dir, files_dir):
     from deltachat_rpc_client import DeltaChat, Rpc
-    rpc = Rpc(accounts_dir=files_dir, native_lib_dir=native_lib_dir)
+    kwargs = {"accounts_dir": os.path.join(files_dir, "accounts")}
+    if native_lib_dir:
+        # Android/Chaquopy: the rpc server ships as an executable
+        # librpcsrv.so in the app's native library directory.
+        kwargs["rpc_server_path"] = os.path.join(native_lib_dir, "librpcsrv.so")
+    # Desktop: rpc_server_path defaults to deltachat-rpc-server on PATH.
+    rpc = Rpc(**kwargs)
     rpc.start()
     return rpc, DeltaChat(rpc)
 
