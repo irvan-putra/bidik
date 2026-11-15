@@ -41,4 +41,21 @@ class UrlGuardTest {
         assertTrue(UrlGuard.isAllowed("http://172.15.9.9/")) // outside 172.16-31
         assertTrue(UrlGuard.isAllowed("http://192.169.1.1/")) // outside 192.168
     }
+
+    @Test
+    fun testHookUnlocksLoopbackOnly() {
+        try {
+            UrlGuard.allowLoopbackForTests = true
+            assertTrue(UrlGuard.isAllowed("http://127.0.0.1:8080/fixture"))
+            assertTrue(UrlGuard.isAllowed("http://localhost:9/fixture"))
+            // Everything else stays blocked even with the hook on.
+            assertFalse(UrlGuard.isAllowed("http://10.0.0.1/"))
+            assertFalse(UrlGuard.isAllowed("http://192.168.1.1/"))
+            assertFalse(UrlGuard.isAllowed("https://router.local/"))
+            assertFalse(UrlGuard.isAllowed("file://127.0.0.1/x"))
+        } finally {
+            UrlGuard.allowLoopbackForTests = false
+        }
+        assertFalse(UrlGuard.isAllowed("http://127.0.0.1:8080/fixture"))
+    }
 }

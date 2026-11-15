@@ -51,6 +51,18 @@ class MainActivityRenderTest {
         val out = File("/tmp/mata-main-activity.png")
         FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         assertTrue("render missing: $out", out.exists() && out.length() > 5_000)
+
+        // The Diagnostics entry point must be reachable in every state.
+        fun findButton(v: View, label: String): Boolean {
+            if (v is android.widget.Button && v.text.toString() == label) return true
+            if (v is android.view.ViewGroup) {
+                for (i in 0 until v.childCount) {
+                    if (findButton(v.getChildAt(i), label)) return true
+                }
+            }
+            return false
+        }
+        assertTrue("Diagnostics button must be present", findButton(root, "Diagnostics"))
     }
 
     @Test

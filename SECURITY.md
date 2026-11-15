@@ -26,6 +26,14 @@ private content into captures.
   the queue, captures each page and sends results back automatically,
   with no per-run tap. Unpaired, a run starts only from the app's
   button. Results go only to the single paired contact.
+- **Diagnostics without secrets.** The app keeps an on-device log
+  (`filesDir/logs/events.log`, one rotated previous generation) of stage
+  names, timings, counters and bounded error categories, so a failing run says
+  which step failed. The log stores bounded error categories, page
+  ordinals, timings and counters only; arbitrary URLs, hostnames, page
+  identifiers, exception text, keys, pairing QR payloads, message
+  contents and captured page data are omitted. The log leaves the
+  phone only via the explicit Share action in the Diagnostics view.
 - **Local capture archive.** Every run writes its screenshots to its own
   `captures/run-*` directory in the app-private files dir. Archives are
   kept, never auto-deleted; they leave the phone only via the paired

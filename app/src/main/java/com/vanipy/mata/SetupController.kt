@@ -38,16 +38,26 @@ object SetupController {
      */
     suspend fun completePairing(context: Context, qrText: String): String =
         withContext(Dispatchers.IO) {
-            if (!Python.isStarted()) Python.start(AndroidPlatform(context))
-            val result = Python.getInstance().getModule("dc_transport")
-                .callAttr(
-                    "complete_pairing",
-                    context.applicationInfo.nativeLibraryDir,
-                    context.filesDir.absolutePath,
-                    qrText.trim()
-                )
-                .toString()
-            recordPairedPeer(context, result)
+            // Never log the QR payload: it carries the inviter's key material.
+            val start = System.currentTimeMillis()
+            DiagLog.log(context, "pair", "start")
+            try {
+                if (!Python.isStarted()) Python.start(AndroidPlatform(context))
+                val result = Python.getInstance().getModule("dc_transport")
+                    .callAttr(
+                        "complete_pairing",
+                        context.applicationInfo.nativeLibraryDir,
+                        context.filesDir.absolutePath,
+                        qrText.trim()
+                    )
+                    .toString()
+                recordPairedPeer(context, result).also {
+                    DiagLog.log(context, "pair", "ok", ms = System.currentTimeMillis() - start)
+                }
+            } catch (e: Exception) {
+                DiagLog.log(context, "pair", "failed", ms = System.currentTimeMillis() - start, detail = "category=${DiagLog.errorCategory(e)}")
+                throw e
+            }
         }
 
     /** Parse the module's pairing result and store the peer. Split out
@@ -64,21 +74,32 @@ object SetupController {
 
     fun unpair(context: Context) {
         prefs(context).edit().putBoolean(KEY_PAIRED, false).apply()
+        DiagLog.log(context, "pair", "unpaired")
     }
 
     /** Explicit-setup account creation. Returns the app's address. */
     suspend fun provision(context: Context, relay: String): String =
         withContext(Dispatchers.IO) {
-            if (!Python.isStarted()) Python.start(AndroidPlatform(context))
-            Python.getInstance().getModule("dc_transport")
-                .callAttr(
-                    "provision",
-                    context.applicationInfo.nativeLibraryDir,
-                    context.filesDir.absolutePath,
-                    relay
-                )
-                .toString()
-                .also { prefs(context).edit().putBoolean(KEY_PROVISIONED, true).apply() }
+            val start = System.currentTimeMillis()
+            DiagLog.log(context, "account", "create_start")
+            try {
+                if (!Python.isStarted()) Python.start(AndroidPlatform(context))
+                Python.getInstance().getModule("dc_transport")
+                    .callAttr(
+                        "provision",
+                        context.applicationInfo.nativeLibraryDir,
+                        context.filesDir.absolutePath,
+                        relay
+                    )
+                    .toString()
+                    .also {
+                        prefs(context).edit().putBoolean(KEY_PROVISIONED, true).apply()
+                        DiagLog.log(context, "account", "create_ok", ms = System.currentTimeMillis() - start)
+                    }
+            } catch (e: Exception) {
+                DiagLog.log(context, "account", "create_failed", ms = System.currentTimeMillis() - start, detail = "category=${DiagLog.errorCategory(e)}")
+                throw e
+            }
         }
 
     suspend fun selfAddress(context: Context): String? = withContext(Dispatchers.IO) {

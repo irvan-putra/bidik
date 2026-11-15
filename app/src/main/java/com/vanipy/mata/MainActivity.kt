@@ -77,6 +77,10 @@ class MainActivity : AppCompatActivity() {
         root.addView(progress)
         status = TextView(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(24, 8, 24, 8) }
         root.addView(status)
+        root.addView(Button(this).apply {
+            text = "Diagnostics"
+            setOnClickListener { showDiagnostics() }
+        })
         setupBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 8, 24, 16)
@@ -89,6 +93,7 @@ class MainActivity : AppCompatActivity() {
         setupScroll.addView(setupBox)
         root.addView(setupScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
+        DiagLog.log(this, "app", "open")
 
         renderSetup()
         if (SetupController.isPaired(this)) {
@@ -252,6 +257,7 @@ class MainActivity : AppCompatActivity() {
         // and collide on the run directory.
         if (!runGate.tryAcquire()) {
             status.text = "a run is already in progress"
+            DiagLog.log(this, "run", "rejected", detail = "already in progress")
             return
         }
         progress.visibility = View.VISIBLE
@@ -279,6 +285,38 @@ class MainActivity : AppCompatActivity() {
                 runGate.release()
             }
         }
+    }
+
+    internal fun showDiagnostics() {
+        val view = ScrollView(this).apply {
+            addView(TextView(this@MainActivity).apply {
+                text = DiagLog.tail(this@MainActivity)
+                setPadding(24, 16, 24, 16)
+                typeface = android.graphics.Typeface.MONOSPACE
+                textSize = 11f
+            })
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Diagnostics (no keys, no message or page contents)")
+            .setView(view)
+            .setPositiveButton("Share full log") { _, _ -> shareDiagnostics() }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    internal fun shareDiagnostics() {
+        val export = File(cacheDir, "diagnostics/mata-diagnostics.txt")
+        export.parentFile?.mkdirs()
+        export.writeText(DiagLog.fullText(this))
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this, "com.vanipy.mata.fileprovider", export
+        )
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(android.content.Intent.createChooser(intent, "Share diagnostics"))
     }
 
     internal fun newRunDir(base: File): File {

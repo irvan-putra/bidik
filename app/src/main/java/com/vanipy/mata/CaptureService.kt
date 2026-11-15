@@ -29,7 +29,19 @@ class CaptureRunner(
 
     suspend fun runOnce(): RunOutcome = withContext(Dispatchers.Main) {
         outDir.mkdirs()
-        val queue = transport.fetchQueue()
+        val runLog = File(outDir, "run.log")
+        val runStart = System.currentTimeMillis()
+        DiagLog.log(activity, "run", "start")
+        val queueStart = System.currentTimeMillis()
+        val queue = try {
+            transport.fetchQueue().also {
+                DiagLog.log(activity, "queue", "ok", ms = System.currentTimeMillis() - queueStart, detail = "pages=${it.size}")
+            }
+        } catch (e: Exception) {
+            DiagLog.log(activity, "queue", "failed", ms = System.currentTimeMillis() - queueStart, detail = "category=${DiagLog.errorCategory(e)}")
+            DiagLog.log(activity, "run", "failed", ms = System.currentTimeMillis() - runStart, detail = "stage=queue")
+            throw e
+        }
         var ok = 0
         val failures = ArrayList<String>()
         val failedIds = ArrayList<String>()
@@ -41,9 +53,10 @@ class CaptureRunner(
             .put("density", activity.resources.displayMetrics.density.toDouble())
             .put("font_scale", activity.resources.configuration.fontScale.toDouble())
 
-        for (job in queue) {
+        for ((index, job) in queue.withIndex()) {
+            val pageStart = System.currentTimeMillis()
             try {
-                val settleStart = System.currentTimeMillis()
+                val settleStart = pageStart
                 val out = engine.capture(job, outDir)
                 val settleMs = System.currentTimeMillis() - settleStart - out.loadMs
                 val captures = mutableListOf(out.viewportPng.name)
@@ -65,6 +78,9 @@ class CaptureRunner(
                 )
                 transport.sendResult(resultJson, files)
                 ok++
+                val pageMs = System.currentTimeMillis() - settleStart
+                DiagLog.log(activity, "capture", "ok", ms = pageMs, detail = "page_index=${index + 1}")
+                DiagLog.appendLine(runLog, "ok page_index=${index + 1} ${pageMs}ms")
             } catch (e: Exception) {
                 val resultJson = QueueProtocol.resultJson(
                     job = job,
@@ -82,11 +98,20 @@ class CaptureRunner(
                 transport.sendResult(resultJson, emptyList())
                 failures.add("${job.id}: ${e.message}")
                 failedIds.add(job.id)
+                val pageMs = System.currentTimeMillis() - pageStart
+                val category = DiagLog.errorCategory(e)
+                DiagLog.log(activity, "capture", "failed", ms = pageMs, detail = "page_index=${index + 1} category=$category")
+                DiagLog.appendLine(runLog, "failed page_index=${index + 1} ${pageMs}ms category=$category")
             }
         }
         transport.sendSummary(
             "capture run: $ok ok, ${failures.size} failed" +
                 if (failures.isNotEmpty()) "\n" + failures.joinToString("\n") else ""
+        )
+        DiagLog.log(
+            activity, "run", "end",
+            ms = System.currentTimeMillis() - runStart,
+            detail = "ok=$ok failed=${failures.size}"
         )
         RunOutcome(ok, failures.size, failures, failedIds)
     }

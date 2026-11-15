@@ -144,6 +144,13 @@ class WebViewCaptureEngine(private val activity: Activity) {
             } catch (e: Exception) {
                 null
             } ?: throw CaptureException("no host: $url")
+            // Test-only fixture path: loopback never leaves the device,
+            // so resolution and public-address checks are skipped. The
+            // flag is honored only in debug builds and set only by
+            // instrumented tests.
+            if (UrlGuard.loopbackUnlocked() && UrlGuard.isLoopbackHost(host.lowercase())) {
+                return@withContext
+            }
             val addrs = try {
                 InetAddress.getAllByName(host)
             } catch (e: UnknownHostException) {
