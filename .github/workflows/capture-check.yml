@@ -96,6 +96,9 @@ jobs:
           # The pinned action runs each script line in its own sh process; use one helper invocation.
           script: sh tools/capture-emulator.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        # Runs on failure too: failing captures are exactly the pixels we
+        # need to inspect (default success() skipped this on failed runs).
+        if: always()
         with:
           name: capture-pixels
           path: captures/

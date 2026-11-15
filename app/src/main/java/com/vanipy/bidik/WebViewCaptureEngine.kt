@@ -69,9 +69,15 @@ class WebViewCaptureEngine(private val activity: Activity) {
                 layoutAlgorithm = android.webkit.WebSettings.LayoutAlgorithm.TEXT_AUTOSIZING
                 mediaPlaybackRequiresUserGesture = true
             }
-            // Software layer so view.draw(canvas) renders WebView content
-            // into our bitmap without needing a window for PixelCopy.
-            webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+            // 43699313460: a detached WebView (even with a software layer)
+            // never composites on this platform build - draws stayed uniform
+            // for 3s after a completed page load. Attach the view for the
+            // duration of the capture so the renderer actually produces
+            // frames; removed in the finally below. In the capture activity
+            // the page is briefly visible while it loads.
+            activity.addContentView(
+                webView, android.view.ViewGroup.LayoutParams(widthPx, heightPx)
+            )
             webView.layout(0, 0, widthPx, heightPx)
 
             val loaded = CompletableDeferred<Boolean>()
@@ -144,13 +150,17 @@ class WebViewCaptureEngine(private val activity: Activity) {
             // per-page wait budget (dynamic pages keep mutating after load).
             awaitReady(webView, job.waitMs)
 
-            // 43698674804: on a hardware-accelerated guest the page reports
-            // loaded (page_started -> page_finished in ~30ms) well before the
-            // renderer composites its first frame, and an immediate draw
-            // produced a blank/uniform capture. Poll-draw until the frame
-            // actually varies, bounded at 3s; a genuinely uniform page just
-            // costs the bound.
-            awaitPaintedFrame(webView, widthPx, heightPx)
+            // Wait for the supported readiness signal: the visual-state
+            // callback fires when the loaded content has been composited and
+            // is ready to draw. Bounded at 5s; on timeout we still attempt
+            // the draw rather than fail the capture.
+            val vsReady = CompletableDeferred<Boolean>()
+            webView.postVisualStateCallback(0L, object : WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) { vsReady.complete(true) }
+            })
+            if (withTimeoutOrNull(5_000) { vsReady.await() } == null) {
+                DiagLog.log(activity, "capture", "visual_state_timeout")
+            }
 
             val viewportPng = File(outDir, "${job.id}-viewport.png")
             drawToFile(webView, widthPx, heightPx, viewportPng)
@@ -174,6 +184,7 @@ class WebViewCaptureEngine(private val activity: Activity) {
                 engineVersion = WebView.getCurrentWebViewPackage()?.versionName ?: "unknown"
             )
         } finally {
+            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
             webView.destroy()
         }
     }
@@ -226,33 +237,6 @@ class WebViewCaptureEngine(private val activity: Activity) {
      * point; the wait_ms budget defines the capture moment for them, it
      * does not prove the page stopped changing.
      */
-    private fun bitmapIsUniform(bitmap: android.graphics.Bitmap): Boolean {
-        val first = bitmap.getPixel(0, 0)
-        var y = 0
-        while (y < bitmap.height) {
-            var x = 0
-            while (x < bitmap.width) {
-                if (bitmap.getPixel(x, y) != first) return false
-                x += 13
-            }
-            y += 13
-        }
-        return true
-    }
-
-    private suspend fun awaitPaintedFrame(webView: WebView, widthPx: Int, heightPx: Int) {
-        val deadline = System.currentTimeMillis() + 3_000
-        val scratch = android.graphics.Bitmap.createBitmap(
-            widthPx, heightPx, android.graphics.Bitmap.Config.ARGB_8888
-        )
-        while (System.currentTimeMillis() < deadline) {
-            webView.draw(android.graphics.Canvas(scratch))
-            if (!bitmapIsUniform(scratch)) return
-            kotlinx.coroutines.delay(200)
-        }
-        DiagLog.log(activity, "capture", "paint_deadline", detail = "uniform_after=3000ms")
-    }
-
     private suspend fun awaitReady(webView: WebView, extraWaitMs: Long) {
         val deadline = System.currentTimeMillis() + 10_000
         while (System.currentTimeMillis() < deadline) {
