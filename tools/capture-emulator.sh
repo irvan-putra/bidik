@@ -151,6 +151,9 @@ if ! run_instrumented com.vanipy.bidik.CaptureFixtureTest /tmp/fixture-instrumen
   find app/build/intermediates -name AndroidManifest.xml -path '*debug*' 2>/dev/null | while read -r m; do grep -l networkSecurityConfig "$m" 2>/dev/null; done | head -3 >&2 || true
   echo "== fixture server evidence ==" >&2
   adb shell 'cat /sdcard/Android/data/com.vanipy.bidik/files/captures/fixture-server.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -20 >&2 || true
+  # Internal fallback (test writes here when external storage is broken,
+  # e.g. FUSE lost to a system-server crash).
+  adb shell 'run-as com.vanipy.bidik cat files/captures/fixture-server.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -20 >&2 || true
   echo "== exported on-device diagnostics (no run-as) ==" >&2
   adb shell 'cat /sdcard/Android/data/com.vanipy.bidik/files/captures/diag-events-prev.log /sdcard/Android/data/com.vanipy.bidik/files/captures/diag-events.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -80 >&2 || true
   adb shell 'run-as com.vanipy.bidik echo diag-dump-marker' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true

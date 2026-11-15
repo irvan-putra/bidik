@@ -49,10 +49,15 @@ class CaptureFixtureTest {
     // Request-side evidence, readable from adb without run-as: did the
     // WebView's connection ever REACH the fixture server, and was a
     // response fully served? Bounded lines only: "accept" / "served".
-    private fun serverEvidence(): File =
-        InstrumentationRegistry.getInstrumentation().targetContext
-            .getExternalFilesDir(null)!!.resolve("captures").apply { mkdirs() }
+    // Falls back to internal storage when external storage is unavailable
+    // (run 43693076299: sdcard/FUSE died with a system-server crash and
+    // getExternalFilesDir returned null).
+    private fun serverEvidence(): File {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val base = ctx.getExternalFilesDir(null) ?: ctx.filesDir
+        return base.resolve("captures").apply { mkdirs() }
             .resolve("fixture-server.log")
+    }
 
     @Before
     fun startFixtureServer() {
