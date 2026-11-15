@@ -17,11 +17,11 @@ android {
         versionName '0.1.0'
         // Chaquopy requires an explicit ABI list, so the filter is always
         // set, never dropped. Production builds arm64-v8a only: the
-        // DeltaChat rpc server binary is published upstream for
-        // arm64-v8a and armeabi-v7a, no x86. The CI emulator capture
-        // check builds x86_64 via -PciEmulator; that variant never
-        // starts the DeltaChat runtime, so the absent x86 server binary
-        // is never exercised there.
+        // DeltaChat rpc server vendored under jniLibs (see THIRD-PARTY.md)
+        // is published upstream for arm64-v8a and armeabi-v7a, no x86.
+        // The CI emulator capture check builds x86_64 via -PciEmulator;
+        // that variant never starts the DeltaChat runtime, so the absent
+        // x86 server binary is never exercised there.
         if (project.hasProperty('ciEmulator')) {
             ndk { abiFilters 'x86_64' }
         } else {
