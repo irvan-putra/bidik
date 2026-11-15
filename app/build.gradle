@@ -51,17 +51,25 @@ chaquopy {
 def rpcWheelFile = "${buildDir}/rpcsrv/deltachat_rpc_server-2.69.0.whl"
 def rpcLibOut = "${buildDir}/rpcsrv/jniLibs/arm64-v8a/librpcsrv.so"
 tasks.register('fetchRpcServer') {
-    onlyIf { !project.hasProperty('ciEmulator') && !file(rpcLibOut).exists() }
+    onlyIf { !project.hasProperty('ciEmulator') }
     doLast {
+        def sha = { File f ->
+            java.security.MessageDigest.getInstance('SHA-256')
+                .digest(f.bytes).encodeHex().toString()
+        }
+        def binaryOk = { File f ->
+            f.exists() && sha(f) == '101c7c59675f295efa601eba0e4bcf01fa2456e44b8aa9ed2fa999c6fb995257'
+        }
+        def out = file(rpcLibOut)
+        // The cached binary is ALWAYS hash-checked; a match skips the
+        // download, anything else is deleted and fetched again.
+        if (binaryOk(out)) return
+        if (out.exists()) out.delete()
         def wheel = file(rpcWheelFile)
         wheel.parentFile.mkdirs()
         if (!wheel.exists()) {
             new URL('https://files.pythonhosted.org/packages/50/66/7b6428ac9a4a73bfc3199a26477b2fb3d0e60d78485c1d0d0b2b755a04f8/deltachat_rpc_server-2.69.0-py3-none-android_21_arm64_v8a.whl')
                 .withInputStream { s -> wheel.newOutputStream() << s }
-        }
-        def sha = { File f ->
-            java.security.MessageDigest.getInstance('SHA-256')
-                .digest(f.bytes).encodeHex().toString()
         }
         // Wheel hash per the PyPI release metadata for 2.69.0.
         if (sha(wheel) != '8951349d8805e276ac574f7588a9a23759c33bc208443eafc48ab03361bf0c54') {
@@ -69,14 +77,19 @@ tasks.register('fetchRpcServer') {
             throw new GradleException('rpc server wheel sha256 mismatch; deleted')
         }
         def zip = new java.util.zip.ZipFile(wheel)
-        def entry = zip.getEntry('deltachat_rpc_server/deltachat-rpc-server')
-        def out = file(rpcLibOut)
-        out.parentFile.mkdirs()
-        zip.getInputStream(entry).withStream { s -> out.newOutputStream() << s }
-        zip.close()
+        try {
+            def entry = zip.getEntry('deltachat_rpc_server/deltachat-rpc-server')
+            if (entry == null) {
+                throw new GradleException('rpc server binary missing from the official wheel')
+            }
+            out.parentFile.mkdirs()
+            zip.getInputStream(entry).withStream { s -> out.newOutputStream() << s }
+        } finally {
+            zip.close()
+        }
         out.setExecutable(true)
         // Binary hash recorded in THIRD-PARTY.md.
-        if (sha(out) != '101c7c59675f295efa601eba0e4bcf01fa2456e44b8aa9ed2fa999c6fb995257') {
+        if (!binaryOk(out)) {
             out.delete()
             throw new GradleException('rpc server binary sha256 mismatch; deleted')
         }

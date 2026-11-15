@@ -33,6 +33,18 @@ import java.io.File
  * Account creation and pairing are explicit user actions from the setup
  * section; the app never creates an account on first launch.
  */
+/**
+ * One-at-a-time gate for capture runs. The Run button, the on-open auto
+ * run and the post-pairing callback can all fire together; overlapping
+ * runs would share DcQueueTransport.lastQueueId (wrong ledger) and
+ * collide on the run directory.
+ */
+internal class RunGate {
+    private val busy = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun tryAcquire(): Boolean = busy.compareAndSet(false, true)
+    fun release() = busy.set(false)
+}
+
 class MainActivity : AppCompatActivity() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -83,6 +95,8 @@ class MainActivity : AppCompatActivity() {
 
     private var transport: QueueTransport? = null
 
+    internal val runGate = RunGate()
+
     // One transport instance per pairing state. DcQueueTransport keeps
     // run-scoped state (lastQueueId) that finishRun needs; building a
     // fresh instance per call silently dropped the run ledger, so
@@ -121,7 +135,7 @@ class MainActivity : AppCompatActivity() {
                 text = "paired: ${SetupController.peerAddr(this@MainActivity)}"
             })
             setupBox.addView(TextView(this).apply {
-                text = "on open: syncs the queue, captures each page, sends results back automatically"
+                text = "on open: syncs the queue, captures each page, sends results back automatically. Captures are archived per run on this phone and kept until the app's data is cleared."
             })
             return
         }
@@ -136,7 +150,7 @@ class MainActivity : AppCompatActivity() {
             // the account's own transport, and the peer address comes
             // back from it.
             setupBox.addView(TextView(this).apply {
-                text = "step 1: create the messaging account"
+                text = "step 1: create a NEW messaging account on relay nine.testrun.org. Its keys live only on this phone; backup/export is not built yet, so clearing app data loses the account."
             })
             setupBox.addView(Button(this).apply {
                 text = "Create messaging account"
@@ -179,6 +193,9 @@ class MainActivity : AppCompatActivity() {
                 if (qr.isNotEmpty()) completePairing(qr) else status.text = "paste the QR text first"
             }
         })
+        setupBox.addView(TextView(this).apply {
+            text = "captures are archived per run on this phone and kept until the app's data is cleared"
+        })
     }
 
     private fun completePairing(qrText: String) {
@@ -220,28 +237,46 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun runCapture() {
+        // One run at a time: the button, the on-open auto run and the
+        // post-pairing callback can all fire together, and overlapping
+        // runs would share DcQueueTransport.lastQueueId (wrong ledger)
+        // and collide on the run directory.
+        if (!runGate.tryAcquire()) {
+            status.text = "a run is already in progress"
+            return
+        }
         progress.visibility = View.VISIBLE
         status.text = "running..."
         scope.launch {
-            // Every run archives into its own timestamped directory.
-            // Captures are kept, never auto-deleted; they leave the
-            // phone only via the paired transport, and are gone only
-            // when the app's data is cleared.
-            val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
-            val outDir = File(filesDir, "captures/run-$stamp")
-            val outcome = try {
-                CaptureRunner(this@MainActivity, currentTransport(), outDir).runOnce()
-            } catch (e: Exception) {
-                status.text = "run failed: ${e.message}"
+            try {
+                // Every run archives into its own unique directory.
+                // Captures are kept, never auto-deleted; they leave the
+                // phone only via the paired transport, and are gone only
+                // when the app's data is cleared.
+                val outDir = newRunDir(filesDir)
+                val outcome = try {
+                    CaptureRunner(this@MainActivity, currentTransport(), outDir).runOnce()
+                } catch (e: Exception) {
+                    status.text = "run failed: ${e.message}"
+                    progress.visibility = View.GONE
+                    return@launch
+                }
                 progress.visibility = View.GONE
-                return@launch
+                status.text = "done: ${outcome.ok} ok, ${outcome.failed} failed"
+                // Ledger: full success serves the queue; partial failure
+                // records only the failed pages for the next sync's retry.
+                (currentTransport() as? DcQueueTransport)?.finishRun(outcome.failedIds)
+            } finally {
+                runGate.release()
             }
-            progress.visibility = View.GONE
-            status.text = "done: ${outcome.ok} ok, ${outcome.failed} failed"
-            // Ledger: full success serves the queue; partial failure
-            // records only the failed pages for the next sync's retry.
-            (currentTransport() as? DcQueueTransport)?.finishRun(outcome.failedIds)
         }
+    }
+
+    internal fun newRunDir(base: File): File {
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss-SSS", java.util.Locale.US)
+            .format(java.util.Date())
+        val suffix = (1000..9999).random()
+        return File(base, "captures/run-$stamp-$suffix")
     }
 
     override fun onDestroy() {

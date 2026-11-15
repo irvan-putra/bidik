@@ -19,9 +19,19 @@ private content into captures.
 - **Resource caps.** A queue is limited to 20 pages, per-page load has a
   30s timeout, settle wait is clamped to 15s, and full-page captures are
   capped at 16000px height to bound memory and runtime.
-- **Manual sending only.** A capture run starts from the app's button;
-  nothing sends in the background in v1. Results go only to the single
-  paired contact.
+- **Explicit setup, automatic runs once paired.** Creating the
+  messaging account (a new account on relay nine.testrun.org) and
+  pairing are explicit button actions, and pairing completes the
+  standard secure-join handshake. Once paired, opening the app syncs
+  the queue, captures each page and sends results back automatically,
+  with no per-run tap. Unpaired, a run starts only from the app's
+  button. Results go only to the single paired contact.
+- **Local capture archive.** Every run writes its screenshots to its own
+  `captures/run-*` directory in the app-private files dir. Archives are
+  kept, never auto-deleted; they leave the phone only via the paired
+  transport and are gone only when the app's data is cleared. Account
+  keys live only on the phone (backup/export is not built yet), so
+  clearing app data also loses the messaging account.
 - **Private profile.** The messaging profile (when transport is enabled)
   lives in the app-private files dir with `android:allowBackup="false"`.
 - **Repo hygiene.** No queues, captures, contact addresses, credentials or

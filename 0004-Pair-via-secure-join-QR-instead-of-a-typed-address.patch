@@ -1,0 +1,218 @@
+From 33dc619751a8593e4534dcd155efa4a4f3e5c024 Mon Sep 17 00:00:00 2001
+From: irvan-putra <irvan.putra@gmail.com>
+Date: Sun, 15 Nov 2026 08:59:56 +0700
+Subject: [PATCH 4/7] Pair via secure-join QR instead of a typed address
+
+Chatmail requires end-to-end encryption, so typing the peer's address could never pair. The setup screen now scans the assistant's secure-join invite QR (zxing-android-embedded, Apache-2.0, see THIRD-PARTY.md) or accepts the pasted QR text as a fallback, and completes the handshake through dc_transport.complete_pairing; the returned peer address is what gets stored. recordPairedPeer is split out so the Kotlin/module contract is unit tested (Robolectric).
+---
+ THIRD-PARTY.md                                |  9 ++++
+ app/build.gradle                              |  1 +
+ .../main/java/com/vanipy/mata/MainActivity.kt | 48 ++++++++++++++-----
+ .../java/com/vanipy/mata/SetupController.kt   | 29 ++++++++++-
+ .../com/vanipy/mata/SetupControllerTest.kt    | 43 +++++++++++++++++
+ 5 files changed, 116 insertions(+), 14 deletions(-)
+ create mode 100644 app/src/test/java/com/vanipy/mata/SetupControllerTest.kt
+
+diff --git a/THIRD-PARTY.md b/THIRD-PARTY.md
+index e13bf85..8098900 100644
+--- a/THIRD-PARTY.md
++++ b/THIRD-PARTY.md
+@@ -19,3 +19,12 @@ runtime can exec it from the app's native library directory.
+ 
+ Per MPL-2.0 section 3.2, this file is how recipients of the executable
+ form are informed where the Source Code Form is available.
++
++## zxing-android-embedded
++
++Barcode scanner activity used by the setup screen to scan the pairing
++QR code.
++
++- Gradle dependency: com.journeyapps:zxing-android-embedded:4.3.0
++- License: Apache License 2.0
++- Source: https://github.com/journeyapps/zxing-android-embedded
+diff --git a/app/build.gradle b/app/build.gradle
+index 57b737c..361c816 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -44,6 +44,7 @@ dependencies {
+     implementation 'androidx.core:core-ktx:1.12.0'
+     implementation 'androidx.appcompat:appcompat:1.6.1'
+     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
++    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+     testImplementation 'junit:junit:4.13.2'
+     testImplementation 'org.robolectric:robolectric:4.11.1'
+     testImplementation 'androidx.test:core:1.5.0'
+diff --git a/app/src/main/java/com/vanipy/mata/MainActivity.kt b/app/src/main/java/com/vanipy/mata/MainActivity.kt
+index a4e5b40..261e580 100644
+--- a/app/src/main/java/com/vanipy/mata/MainActivity.kt
++++ b/app/src/main/java/com/vanipy/mata/MainActivity.kt
+@@ -10,6 +10,8 @@ import android.widget.ProgressBar
+ import android.widget.ScrollView
+ import android.widget.TextView
+ import androidx.appcompat.app.AppCompatActivity
++import com.journeyapps.barcodescanner.ScanContract
++import com.journeyapps.barcodescanner.ScanOptions
+ import com.vanipy.mata.bot.DcQueueTransport
+ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.Dispatchers
+@@ -38,6 +40,12 @@ class MainActivity : AppCompatActivity() {
+     private lateinit var progress: ProgressBar
+     private lateinit var setupBox: LinearLayout
+ 
++    private val qrScanner =
++        registerForActivityResult(ScanContract()) { result ->
++            val contents = result.contents
++            if (contents != null) completePairing(contents)
++        }
++
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+@@ -112,24 +120,40 @@ class MainActivity : AppCompatActivity() {
+                 }
+             }
+         })
+-        val peerField = EditText(this).apply { hint = "trusted contact address" }
+-        setupBox.addView(peerField)
+         setupBox.addView(Button(this).apply {
+-            text = "Pair"
++            text = "Scan pairing QR"
+             setOnClickListener {
+-                val addr = peerField.text.toString().trim()
+-                if (addr.contains("@")) {
+-                    SetupController.pair(this@MainActivity, addr)
+-                    status.text = "paired"
+-                    renderSetup()
+-                    refreshList { runCapture() }
+-                } else {
+-                    status.text = "enter a full address to pair"
+-                }
++                qrScanner.launch(
++                    ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
++                        .setPrompt("scan the pairing QR")
++                )
++            }
++        })
++        val qrField = EditText(this).apply { hint = "or paste the pairing QR text" }
++        setupBox.addView(qrField)
++        setupBox.addView(Button(this).apply {
++            text = "Pair from pasted QR"
++            setOnClickListener {
++                val qr = qrField.text.toString().trim()
++                if (qr.isNotEmpty()) completePairing(qr) else status.text = "paste the QR text first"
+             }
+         })
+     }
+ 
++    private fun completePairing(qrText: String) {
++        status.text = "pairing..."
++        scope.launch {
++            try {
++                val addr = SetupController.completePairing(this@MainActivity, qrText)
++                status.text = "paired: $addr"
++                renderSetup()
++                refreshList { runCapture() }
++            } catch (e: Exception) {
++                status.text = "pairing failed: ${e.message}"
++            }
++        }
++    }
++
+     private fun refreshList(after: (() -> Unit)? = null) {
+         scope.launch {
+             val queue = try { currentTransport().fetchQueue() } catch (e: Exception) {
+diff --git a/app/src/main/java/com/vanipy/mata/SetupController.kt b/app/src/main/java/com/vanipy/mata/SetupController.kt
+index e80f1bb..d28ade5 100644
+--- a/app/src/main/java/com/vanipy/mata/SetupController.kt
++++ b/app/src/main/java/com/vanipy/mata/SetupController.kt
+@@ -23,11 +23,36 @@ object SetupController {
+     fun isPaired(context: Context): Boolean =
+         prefs(context).getBoolean(KEY_PAIRED, false) && peerAddr(context) != null
+ 
+-    fun pair(context: Context, addr: String) {
++    /**
++     * Pair with the assistant by completing its secure-join invite QR.
++     * Chatmail requires end-to-end encryption, so a typed address can
++     * never be paired with; the QR handshake is the only path. Blocks
++     * until the handshake completes. Returns the paired peer address.
++     */
++    suspend fun completePairing(context: Context, qrText: String): String =
++        withContext(Dispatchers.IO) {
++            if (!Python.isStarted()) Python.start(AndroidPlatform(context))
++            val result = Python.getInstance().getModule("dc_transport")
++                .callAttr(
++                    "complete_pairing",
++                    context.applicationInfo.nativeLibraryDir,
++                    context.filesDir.absolutePath,
++                    qrText.trim()
++                )
++                .toString()
++            recordPairedPeer(context, result)
++        }
++
++    /** Parse the module's pairing result and store the peer. Split out
++     *  so the exact contract with dc_transport.complete_pairing is unit
++     *  testable without a Python runtime. */
++    fun recordPairedPeer(context: Context, resultJson: String): String {
++        val addr = org.json.JSONObject(resultJson).getString("peer_addr")
+         prefs(context).edit()
+-            .putString(KEY_PEER, addr.trim())
++            .putString(KEY_PEER, addr)
+             .putBoolean(KEY_PAIRED, true)
+             .apply()
++        return addr
+     }
+ 
+     fun unpair(context: Context) {
+diff --git a/app/src/test/java/com/vanipy/mata/SetupControllerTest.kt b/app/src/test/java/com/vanipy/mata/SetupControllerTest.kt
+new file mode 100644
+index 0000000..231e3f4
+--- /dev/null
++++ b/app/src/test/java/com/vanipy/mata/SetupControllerTest.kt
+@@ -0,0 +1,43 @@
++package com.vanipy.mata
++
++import androidx.test.core.app.ApplicationProvider
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++
++/**
++ * The Kotlin-side contract with dc_transport.complete_pairing: the
++ * module returns {"status":"ok","peer_addr":...} and the controller
++ * stores exactly that returned address as the paired peer.
++ */
++@RunWith(RobolectricTestRunner::class)
++class SetupControllerTest {
++
++    private val app: android.app.Application
++        get() = ApplicationProvider.getApplicationContext()
++
++    @Test
++    fun recordPairedPeerStoresReturnedAddress() {
++        val addr = SetupController.recordPairedPeer(
++            app, """{"status":"ok","peer_addr":"peer@example.org"}"""
++        )
++        assertEquals("peer@example.org", addr)
++        assertEquals("peer@example.org", SetupController.peerAddr(app))
++        assertTrue(SetupController.isPaired(app))
++    }
++
++    @Test(expected = org.json.JSONException::class)
++    fun recordPairedPeerRejectsResultWithoutAddress() {
++        SetupController.recordPairedPeer(app, """{"status":"ok"}""")
++    }
++
++    @Test
++    fun unpairedByDefault() {
++        val fresh = app.getSharedPreferences("mata", 0)
++        fresh.edit().clear().commit()
++        assertFalse(SetupController.isPaired(app))
++    }
++}
+-- 
+2.34.1
+

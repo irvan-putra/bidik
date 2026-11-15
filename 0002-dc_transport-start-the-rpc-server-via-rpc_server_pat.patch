@@ -1,0 +1,37 @@
+From e9145794123d90c8379bb0e6c3daffbf2de4d62b Mon Sep 17 00:00:00 2001
+From: irvan-putra <irvan.putra@gmail.com>
+Date: Sun, 15 Nov 2026 08:11:06 +0700
+Subject: [PATCH 2/7] dc_transport: start the rpc server via rpc_server_path
+ like the proven pattern
+
+Rpc() forwards unknown kwargs to subprocess.Popen, so passing
+native_lib_dir crashed at first use. On Android the server is the
+executable librpcsrv.so in the app's native lib dir; on desktop the
+deltachat-rpc-server binary is resolved from PATH. Accounts live in
+files_dir/accounts.
+---
+ app/src/main/python/dc_transport.py | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/app/src/main/python/dc_transport.py b/app/src/main/python/dc_transport.py
+index 6e68644..e73eda0 100644
+--- a/app/src/main/python/dc_transport.py
++++ b/app/src/main/python/dc_transport.py
+@@ -156,7 +156,13 @@ def _account_addr(acct):
+ 
+ def _rpc(native_lib_dir, files_dir):
+     from deltachat_rpc_client import DeltaChat, Rpc
+-    rpc = Rpc(accounts_dir=files_dir, native_lib_dir=native_lib_dir)
++    kwargs = {"accounts_dir": os.path.join(files_dir, "accounts")}
++    if native_lib_dir:
++        # Android/Chaquopy: the rpc server ships as an executable
++        # librpcsrv.so in the app's native library directory.
++        kwargs["rpc_server_path"] = os.path.join(native_lib_dir, "librpcsrv.so")
++    # Desktop: rpc_server_path defaults to deltachat-rpc-server on PATH.
++    rpc = Rpc(**kwargs)
+     rpc.start()
+     return rpc, DeltaChat(rpc)
+ 
+-- 
+2.34.1
+

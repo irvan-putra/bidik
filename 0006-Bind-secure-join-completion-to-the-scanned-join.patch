@@ -1,0 +1,163 @@
+From 3c7e9d9aafacd4a10f6001fa4e35066e1261b02d Mon Sep 17 00:00:00 2001
+From: irvan-putra <irvan.putra@gmail.com>
+Date: Sun, 15 Nov 2026 09:30:55 +0700
+Subject: [PATCH 6/7] Bind secure-join completion to the scanned join
+
+The pairing wait accepted any SecurejoinJoinerProgress==1000 event, including stale or unrelated ones. Runtime-verified event contract (fresh live join: payload {"contactId": N, "kind": ..., "progress": ...}, join chat contact id N): clear all events before scanning, then accept only progress 1000 whose contactId is the scanned join chat's own contact. Tests cover unrelated-contact completion, progress<1000, pre-scan event clearing, and post-clear delivery of the matching completion.
+---
+ app/src/main/python/dc_transport.py      | 31 ++++++++------
+ app/src/test/python/test_dc_transport.py | 52 +++++++++++++++++++++++-
+ 2 files changed, 70 insertions(+), 13 deletions(-)
+
+diff --git a/app/src/main/python/dc_transport.py b/app/src/main/python/dc_transport.py
+index e73eda0..cc2e5c1 100644
+--- a/app/src/main/python/dc_transport.py
++++ b/app/src/main/python/dc_transport.py
+@@ -216,13 +216,23 @@ def _complete_pairing_impl(acct, files_dir, qr_text, timeout_secs=180):
+     import time
+     from queue import Empty
+     acct.start_io()
++    # Drop any event from before this attempt so a stale or unrelated
++    # SecurejoinJoinerProgress can never satisfy the wait below.
++    acct._rpc.clear_all_events(acct.id)
+     chat = acct.secure_join(qr_text)
+-    # Bounded wait for the joiner-side handshake event. Snapshot fields
+-    # are NOT a valid signal: the 2.69 basic chat snapshot has no
+-    # is_protected key at all, and its is_encrypted is True even on the
+-    # self chats. SecurejoinJoinerProgress == 1000 is the real one.
+-    # rpc.get_queue(account_id) is a local event queue, so a timeout
+-    # here costs no rpc round trip.
++    contacts = chat.get_contacts()
++    if len(contacts) != 1:
++        raise RuntimeError(
++            "join chat has %d contacts, expected exactly 1" % len(contacts))
++    peer_id = contacts[0].id
++    # Bounded wait for THIS join's completion. Snapshot fields are NOT a
++    # valid signal: the 2.69 basic chat snapshot has no is_protected key
++    # at all, and its is_encrypted is True even on the self chats. The
++    # completion event is SecurejoinJoinerProgress with progress == 1000
++    # AND contactId == this join chat's contact (runtime-verified: the
++    # event payload is {"contactId": N, "kind": ..., "progress": ...}).
++    # Anything else - other progress values, other contacts, events that
++    # predate the scan - is ignored.
+     events = acct._rpc.get_queue(acct.id)
+     deadline = time.time() + timeout_secs
+     while True:
+@@ -234,16 +244,13 @@ def _complete_pairing_impl(acct, files_dir, qr_text, timeout_secs=180):
+         except Empty:
+             continue
+         if (event or {}).get("kind") == "SecurejoinJoinerProgress" \
+-                and event.get("progress") == 1000:
++                and event.get("progress") == 1000 \
++                and event.get("contactId") == peer_id:
+             break
+-    contacts = chat.get_contacts()
+-    if len(contacts) != 1:
+-        raise RuntimeError(
+-            "paired chat has %d contacts, expected exactly 1" % len(contacts))
+     addr = getattr(contacts[0].get_snapshot(), "address", None)
+     if not addr:
+         raise RuntimeError("paired peer contact has no readable address")
+-    save_state(files_dir, peer_contact_id=contacts[0].id, peer_addr=addr)
++    save_state(files_dir, peer_contact_id=peer_id, peer_addr=addr)
+     return {"status": "ok", "peer_addr": addr}
+ 
+ 
+diff --git a/app/src/test/python/test_dc_transport.py b/app/src/test/python/test_dc_transport.py
+index 39e768e..22a2b8e 100644
+--- a/app/src/test/python/test_dc_transport.py
++++ b/app/src/test/python/test_dc_transport.py
+@@ -161,10 +161,19 @@ class FakePairChat:
+ class _FakeRpc:
+     def __init__(self, events):
+         self._events = events
++        self.cleared = False
+ 
+     def get_queue(self, account_id):
+         return self._events
+ 
++    def clear_all_events(self, account_id):
++        self.cleared = True
++        while True:
++            try:
++                self._events.get_nowait()
++            except Exception:
++                return
++
+ 
+ class FakeAcct:
+     id = 1
+@@ -177,7 +186,8 @@ class FakeAcct:
+         self.pair_chat = FakePairChat()
+         self.scanned_qrs = []
+         self.events = _q.Queue()
+-        self.events.put({"kind": "SecurejoinJoinerProgress", "progress": 1000})
++        self.events.put({"kind": "SecurejoinJoinerProgress",
++                         "progress": 1000, "contactId": 42})
+         self._rpc = _FakeRpc(self.events)
+ 
+     def start_io(self):
+@@ -247,6 +257,18 @@ class CompletePairingTest(unittest.TestCase):
+         self.dir.cleanup()
+ 
+     def test_stores_peer_contact_id_and_addr(self):
++        # The pre-scan clear drains anything enqueued before the attempt,
++        # so deliver this join's completion event right after the clear.
++        rpc = _FakeRpc(self.acct.events)
++        original_clear = rpc.clear_all_events
++
++        def clear_then_deliver(account_id):
++            original_clear(account_id)
++            self.acct.events.put({"kind": "SecurejoinJoinerProgress",
++                                  "progress": 1000, "contactId": 42})
++
++        rpc.clear_all_events = clear_then_deliver
++        self.acct._rpc = rpc
+         res = t._complete_pairing_impl(self.acct, self.dir.name, "dcaccount:fake-qr")
+         self.assertEqual(res["status"], "ok")
+         self.assertEqual(res["peer_addr"], "peer@example.com")
+@@ -254,6 +276,7 @@ class CompletePairingTest(unittest.TestCase):
+         self.assertEqual(st["peer_contact_id"], 42)
+         self.assertEqual(st["peer_addr"], "peer@example.com")
+         self.assertEqual(self.acct.scanned_qrs, ["dcaccount:fake-qr"])
++        self.assertTrue(rpc.cleared)
+ 
+     def test_unfinished_handshake_times_out(self):
+         import queue as _q
+@@ -262,6 +285,33 @@ class CompletePairingTest(unittest.TestCase):
+         with self.assertRaises(RuntimeError):
+             t._complete_pairing_impl(self.acct, self.dir.name, "qr", timeout_secs=0)
+ 
++    def test_unrelated_completion_event_never_satisfies_wait(self):
++        # A progress-1000 event for a DIFFERENT contact must not complete
++        # this join. It is re-enqueued after the pre-scan event clear so
++        # the contactId filter (not just the clear) is what rejects it.
++        rpc = _FakeRpc(self.acct.events)
++        original_clear = rpc.clear_all_events
++
++        def clear_then_poison(account_id):
++            original_clear(account_id)
++            self.acct.events.put({"kind": "SecurejoinJoinerProgress",
++                                  "progress": 1000, "contactId": 999})
++
++        rpc.clear_all_events = clear_then_poison
++        self.acct._rpc = rpc
++        with self.assertRaises(RuntimeError):
++            t._complete_pairing_impl(self.acct, self.dir.name, "qr", timeout_secs=1)
++        self.assertTrue(rpc.cleared)
++
++    def test_progress_below_1000_does_not_complete(self):
++        import queue as _q
++        self.acct.events = _q.Queue()
++        self.acct.events.put({"kind": "SecurejoinJoinerProgress",
++                              "progress": 400, "contactId": 42})
++        self.acct._rpc = _FakeRpc(self.acct.events)
++        with self.assertRaises(RuntimeError):
++            t._complete_pairing_impl(self.acct, self.dir.name, "qr", timeout_secs=1)
++
+ 
+ class SendResultTest(unittest.TestCase):
+     def setUp(self):
+-- 
+2.34.1
+
