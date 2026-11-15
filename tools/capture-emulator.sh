@@ -53,14 +53,36 @@ adb shell ping -c 1 -W 3 "$host" && echo "target-host ping succeeded: $host" || 
 # external network dependency. The live-site test below stays as
 # integration coverage but cannot gate: emulator DNS to public hosts is
 # currently unreliable on this runner.
+# Instrumentation driver: Gradle's connectedDebugAndroidTest UNINSTALLS
+# the app when the task ends (run 43684421683: post-task pm path empty,
+# run-as "unknown package", and the sdcard app-data dir carrying the
+# test evidence wiped), destroying all post-task evidence. Build the
+# APKs on the host, install explicitly, and drive am instrument
+# directly so the app - and its evidence - stays present for retrieval.
+echo "== build app + test APKs (host) =="
+./gradlew -PciEmulator assembleDebug assembleDebugAndroidTest --no-daemon
+
+# run_instrumented <test-class> <log-file> <timeout-s> [extra -e args...]
+# am instrument exits 0 even when tests fail, so require the explicit
+# "OK (N tests)" summary in the output.
+run_instrumented() {
+  cls="$1"; log="$2"; secs="$3"; shift 3
+  adb install -r app/build/outputs/apk/debug/app-debug.apk || return 1
+  adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk || return 1
+  set +e
+  timeout -k 30 "$secs" adb shell "am instrument -w -e class $cls $* com.vanipy.mata.test/androidx.test.runner.AndroidJUnitRunner" > "$log" 2>&1
+  irc=$?
+  set -e
+  sed -E 's#https?://[^ ]*#[url]#g' "$log" >&2 || true
+  if [ $irc -ne 0 ] || ! grep -q '^OK (' "$log"; then
+    return 1
+  fi
+  return 0
+}
+
 echo "== capture gate: loopback fixture =="
-set +e
-timeout -k 30 900 ./gradlew -PciEmulator connectedDebugAndroidTest --no-daemon \
-  -Pandroid.testInstrumentationRunnerArguments.class=com.vanipy.mata.CaptureFixtureTest
-rc=$?
-set -e
-if [ $rc -ne 0 ]; then
-  echo "fixture capture run failed or exceeded its 900s bound (rc=$rc); last logcat:" >&2
+if ! run_instrumented com.vanipy.mata.CaptureFixtureTest /tmp/fixture-instrument.log 900; then
+  echo "fixture capture run failed or exceeded its 900s bound; last logcat:" >&2
   adb logcat -d -t 300 >&2 || true
   # Platform network errors (e.g. cleartext denial) name the real cause;
   # the generic test failure alone does not. Bounded to the last matches.
@@ -91,46 +113,13 @@ if [ $rc -ne 0 ]; then
   exit 1
 fi
 
-# Gradle may report BUILD SUCCESSFUL even if no instrumentation tests were
-# discovered. Require a fresh XML report with at least one executed test.
-python3 - <<'PYTESTS'
-import glob
-import sys
-import xml.etree.ElementTree as ET
-
-reports = glob.glob("app/build/outputs/androidTest-results/connected/**/*.xml", recursive=True)
-if not reports:
-    sys.exit("ERROR: no connected instrumentation test XML reports were produced")
-tests = failures = errors = 0
-for path in reports:
-    try:
-        root = ET.parse(path).getroot()
-    except ET.ParseError as exc:
-        sys.exit(f"ERROR: invalid instrumentation test report {path}: {exc}")
-    suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
-    tests += sum(int(s.get("tests", "0")) for s in suites)
-    failures += sum(int(s.get("failures", "0")) for s in suites)
-    errors += sum(int(s.get("errors", "0")) for s in suites)
-print(f"Instrumentation results: {tests} tests, {failures} failures, {errors} errors; reports={len(reports)}")
-if tests < 1:
-    sys.exit("ERROR: zero connected instrumentation tests executed")
-if failures or errors:
-    sys.exit("ERROR: connected instrumentation test failures/errors in XML reports")
-PYTESTS
-
 # Live-site integration coverage: exercised every run and reported, but
 # deliberately NOT the gate while emulator DNS to public hosts is
 # unreliable. A failure here means the external-network path from the CI
 # emulator remains unproven; it says nothing about the capture pipeline.
 echo "== live-site integration attempt (diagnostics only, not gating) =="
-set +e
-timeout -k 30 600 ./gradlew -PciEmulator connectedDebugAndroidTest --no-daemon \
-  -Pandroid.testInstrumentationRunnerArguments.class=com.vanipy.mata.CapturePipelineTest \
-  -Pandroid.testInstrumentationRunnerArguments.queue_url="$QUEUE_URL"
-live_rc=$?
-set -e
-if [ $live_rc -ne 0 ]; then
-  echo "live-site integration attempt failed (rc=$live_rc): external network from the CI emulator remains unproven; not gating"
+if ! run_instrumented com.vanipy.mata.CapturePipelineTest /tmp/live-instrument.log 600 -e queue_url "$QUEUE_URL"; then
+  echo "live-site integration attempt failed: external network from the CI emulator remains unproven; not gating"
 fi
 
 mkdir -p captures
