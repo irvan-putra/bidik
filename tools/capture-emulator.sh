@@ -88,6 +88,12 @@ echo "== wait for device readiness =="
 adb wait-for-device
 wait_ready 420
 
+# Best-effort pixel evidence even on failure: the gate used to exit before
+# the pull, so failed runs (e.g. 43698674804's blank-capture assertion)
+# never uploaded the pixels that explain the failure.
+mkdir -p captures
+trap 'adb pull /sdcard/Android/data/com.vanipy.bidik/files/captures captures >/dev/null 2>&1 || true' EXIT
+
 # Remove only CI-generated result/output folders so a previous run cannot
 # make a zero-test run appear healthy.
 rm -rf app/build/outputs/androidTest-results/connected
