@@ -67,8 +67,10 @@ jobs:
           ram-size: 4096
           # v2.33.0 supports: default, google_apis, aosp_atd, google_atd,
           # google_apis_playstore, android-wear(-cn), android-tv, google-tv.
-          # default = AOSP image, enough for a WebView capture check.
-          target: default
+          # Stability lever after 4 consecutive system-server crashes on the
+          # default AOSP image: google_apis was the stable lead on this
+          # runner family (bounded: a lead, not a guarantee).
+          target: google_apis
           arch: x86_64
           # Keep the action's headless/software-rendering defaults. Pin public
           # resolvers to test whether guest DNS forwarding caused the last run's

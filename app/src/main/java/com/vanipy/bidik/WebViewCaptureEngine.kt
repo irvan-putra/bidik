@@ -73,16 +73,6 @@ class WebViewCaptureEngine(private val activity: Activity) {
             // into our bitmap without needing a window for PixelCopy.
             webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
             webView.layout(0, 0, widthPx, heightPx)
-            // Attach to the activity window: an unattached WebView counts as
-            // hidden and Chromium can defer the load indefinitely (CI runs
-            // 43685608708/43688783344: fixture server accepted and served,
-            // renderer alive, yet no page_started/page_error before the 30s
-            // timeout). Attached and laid out at full size it loads
-            // normally; it still renders into our bitmap offscreen.
-            activity.addContentView(
-                webView,
-                android.view.ViewGroup.LayoutParams(widthPx, heightPx)
-            )
 
             val loaded = CompletableDeferred<Boolean>()
             var finalUrl = job.url
@@ -136,6 +126,17 @@ class WebViewCaptureEngine(private val activity: Activity) {
             val loadMs = System.currentTimeMillis() - loadStart
             if (!ok) {
                 DiagLog.log(activity, "capture", "page_timeout")
+                // Diagnostic-only probe (no production timeout change): keep
+                // the WebView alive a bounded 60s more to learn whether the
+                // client callbacks are lost or merely slower than the 30s
+                // budget on a software-rendered emulator. Runs only on the
+                // failure path.
+                val lateStart = System.currentTimeMillis()
+                val late = withTimeoutOrNull(60_000) { loaded.await() }
+                DiagLog.log(
+                    activity, "capture", "late_callback",
+                    detail = "completed=${late != null} ok=$late ms=${System.currentTimeMillis() - lateStart}"
+                )
                 throw CaptureException("page load failed or timed out: ${job.url}")
             }
 
@@ -165,7 +166,6 @@ class WebViewCaptureEngine(private val activity: Activity) {
                 engineVersion = WebView.getCurrentWebViewPackage()?.versionName ?: "unknown"
             )
         } finally {
-            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
             webView.destroy()
         }
     }

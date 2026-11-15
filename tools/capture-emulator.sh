@@ -12,6 +12,15 @@ esac
 # every service up on this unaccelerated runner, and installing the test
 # APK then fails with "Can't find service: package" (observed run
 # 43677737595). Gate on boot_completed AND the package manager serving.
+# Crash forensics: the filtered post-failure logcat has never contained
+# the FIRST crash across 4 system-server deaths. Dump the system, crash
+# and kernel buffers the moment a gate/install step detects the dead
+# system, while the buffers still hold the boot window.
+crash_forensics() {
+  echo "== crash forensics: system/crash/kernel buffers (URL-stripped) ==" >&2
+  adb shell 'logcat -d -b system -b crash -b kernel -t 400' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -120 >&2 || true
+}
+
 # Readiness gate, reusable: a dying system server (43690400798, zygote
 # fatal during install) restarts the runtime, so install retries re-enter
 # this wait instead of failing the run outright.
@@ -27,6 +36,7 @@ wait_ready() {
     fi
     if [ "$(date +%s)" -ge "$deadline" ]; then
       echo "device not ready within ${secs}s (boot_completed='$boot', pm='$pmok')" >&2
+      crash_forensics
       return 1
     fi
     # 43687078864: the transport can sit in 'offline' for the whole boot
@@ -58,6 +68,7 @@ install_pair_with_retry() {
     fi
     echo "install pair failed (attempt $attempt/3); re-waiting for system health" >&2
     [ "$attempt" = 3 ] && return 1
+    crash_forensics
     wait_ready 180 || return 1
     sleep 10
   done
@@ -65,6 +76,7 @@ install_pair_with_retry() {
   while ! adb shell pm path com.vanipy.bidik 2>/dev/null | grep -q '^package:'; do
     if [ "$(date +%s)" -ge "$pm_deadline" ]; then
       echo "app package not resolvable 120s after install" >&2
+      crash_forensics
       return 1
     fi
     sleep 5
