@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

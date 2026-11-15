@@ -1,4 +1,4 @@
-package com.vanipy.mata.bot;
+package com.vanipy.bidik.bot;
 
 import android.app.Service;
 import android.content.Intent;
@@ -18,8 +18,8 @@ import android.os.IBinder;
  * The python runtime lives in app/src/main/python/dc_transport.py.
  */
 public class BotService extends Service {
-    public static final String ACTION_START = "com.vanipy.mata.bot.START";
-    public static final String ACTION_STOP = "com.vanipy.mata.bot.STOP";
+    public static final String ACTION_START = "com.vanipy.bidik.bot.START";
+    public static final String ACTION_STOP = "com.vanipy.bidik.bot.STOP";
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {

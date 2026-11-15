@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
@@ -36,7 +36,7 @@ class SetupControllerTest {
 
     @Test
     fun unpairedByDefault() {
-        val fresh = app.getSharedPreferences("mata", 0)
+        val fresh = app.getSharedPreferences("bidik", 0)
         fresh.edit().clear().commit()
         assertFalse(SetupController.isPaired(app))
     }

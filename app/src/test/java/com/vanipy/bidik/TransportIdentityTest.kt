@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertSame
@@ -21,7 +21,7 @@ class TransportIdentityTest {
     @Test
     fun currentTransportReturnsTheSameInstanceAcrossCalls() {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
-        app.getSharedPreferences("mata", 0).edit().clear().commit()
+        app.getSharedPreferences("bidik", 0).edit().clear().commit()
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val first = activity.currentTransport()
         val second = activity.currentTransport()

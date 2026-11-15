@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
@@ -32,7 +32,7 @@ class RunGateTest {
     @Test
     fun runDirsAreUniquePerCall() {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
-        app.getSharedPreferences("mata", 0).edit().clear().commit()
+        app.getSharedPreferences("bidik", 0).edit().clear().commit()
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val first = activity.newRunDir(File("/tmp/x"))
         val second = activity.newRunDir(File("/tmp/x"))

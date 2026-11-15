@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import android.content.Context
 import com.chaquo.python.Python
@@ -11,7 +11,7 @@ import kotlinx.coroutines.withContext
  * itself: provisioning happens only from the setup screen button.
  */
 object SetupController {
-    private const val PREFS = "mata"
+    private const val PREFS = "bidik"
     private const val KEY_PEER = "peer_addr"
     private const val KEY_PAIRED = "paired"
     private const val KEY_PROVISIONED = "provisioned"

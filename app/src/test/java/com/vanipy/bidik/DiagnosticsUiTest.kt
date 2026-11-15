@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import android.content.Intent
 import android.graphics.Bitmap
@@ -51,7 +51,7 @@ class DiagnosticsUiTest {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         bmp.eraseColor(android.graphics.Color.WHITE)
         root.draw(Canvas(bmp))
-        val out = File("/tmp/mata-diagnostics-dialog.png")
+        val out = File("/tmp/bidik-diagnostics-dialog.png")
         FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         assertTrue("render missing: $out", out.exists() && out.length() > 5_000)
     }
@@ -74,14 +74,14 @@ class DiagnosticsUiTest {
         @Suppress("DEPRECATION")
         val uri = send.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)!!
         assertEquals("content", uri.scheme)
-        assertEquals("com.vanipy.mata.fileprovider", uri.authority)
+        assertEquals("com.vanipy.bidik.fileprovider", uri.authority)
         assertTrue(
             "read grant flag required",
             send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0
         )
         // The exported bytes are a snapshot in the app cache, the only
         // path the FileProvider exposes (see res/xml/file_paths.xml).
-        val exported = File(activity.cacheDir, "diagnostics/mata-diagnostics.txt")
+        val exported = File(activity.cacheDir, "diagnostics/bidik-diagnostics.txt")
         assertTrue(exported.exists())
         val exportText = exported.readText()
         assertTrue(exportText.contains("\"event\":\"end\""))

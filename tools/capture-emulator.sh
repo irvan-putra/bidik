@@ -70,7 +70,7 @@ run_instrumented() {
   adb install -r app/build/outputs/apk/debug/app-debug.apk || return 1
   adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk || return 1
   set +e
-  timeout -k 30 "$secs" adb shell "am instrument -w -e class $cls $* com.vanipy.mata.test/androidx.test.runner.AndroidJUnitRunner" > "$log" 2>&1
+  timeout -k 30 "$secs" adb shell "am instrument -w -e class $cls $* com.vanipy.bidik.test/androidx.test.runner.AndroidJUnitRunner" > "$log" 2>&1
   irc=$?
   set -e
   sed -E 's#https?://[^ ]*#[url]#g' "$log" >&2 || true
@@ -81,7 +81,7 @@ run_instrumented() {
 }
 
 echo "== capture gate: loopback fixture =="
-if ! run_instrumented com.vanipy.mata.CaptureFixtureTest /tmp/fixture-instrument.log 900; then
+if ! run_instrumented com.vanipy.bidik.CaptureFixtureTest /tmp/fixture-instrument.log 900; then
   echo "fixture capture run failed or exceeded its 900s bound; last logcat:" >&2
   adb logcat -d -t 300 >&2 || true
   # Platform network errors (e.g. cleartext denial) name the real cause;
@@ -98,18 +98,18 @@ if ! run_instrumented com.vanipy.mata.CaptureFixtureTest /tmp/fixture-instrument
   # from "run-as itself failed", so run-as errors are shown (URLs
   # stripped), not suppressed.
   echo "== device/app/webview identity ==" >&2
-  adb shell 'pm path com.vanipy.mata' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
-  adb shell 'dumpsys package com.vanipy.mata | grep -iE "versionName|DEBUGGABLE|pkgFlags"' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
+  adb shell 'pm path com.vanipy.bidik' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
+  adb shell 'dumpsys package com.vanipy.bidik | grep -iE "versionName|DEBUGGABLE|pkgFlags"' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
   adb shell 'dumpsys webviewupdate' 2>&1 | grep -iE 'package|version|valid' | head -5 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
   echo "== merged manifest network config (host build output) ==" >&2
   find app/build/intermediates -name AndroidManifest.xml -path '*debug*' 2>/dev/null | while read -r m; do grep -l networkSecurityConfig "$m" 2>/dev/null; done | head -3 >&2 || true
   echo "== fixture server evidence ==" >&2
-  adb shell 'cat /sdcard/Android/data/com.vanipy.mata/files/captures/fixture-server.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -20 >&2 || true
+  adb shell 'cat /sdcard/Android/data/com.vanipy.bidik/files/captures/fixture-server.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -20 >&2 || true
   echo "== exported on-device diagnostics (no run-as) ==" >&2
-  adb shell 'cat /sdcard/Android/data/com.vanipy.mata/files/captures/diag-events-prev.log /sdcard/Android/data/com.vanipy.mata/files/captures/diag-events.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -80 >&2 || true
-  adb shell 'run-as com.vanipy.mata echo diag-dump-marker' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
-  adb shell 'run-as com.vanipy.mata ls -la files/logs/' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
-  adb shell 'run-as com.vanipy.mata cat files/logs/events-prev.log files/logs/events.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -80 >&2 || true
+  adb shell 'cat /sdcard/Android/data/com.vanipy.bidik/files/captures/diag-events-prev.log /sdcard/Android/data/com.vanipy.bidik/files/captures/diag-events.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -80 >&2 || true
+  adb shell 'run-as com.vanipy.bidik echo diag-dump-marker' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
+  adb shell 'run-as com.vanipy.bidik ls -la files/logs/' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
+  adb shell 'run-as com.vanipy.bidik cat files/logs/events-prev.log files/logs/events.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -80 >&2 || true
   exit 1
 fi
 
@@ -118,12 +118,12 @@ fi
 # unreliable. A failure here means the external-network path from the CI
 # emulator remains unproven; it says nothing about the capture pipeline.
 echo "== live-site integration attempt (diagnostics only, not gating) =="
-if ! run_instrumented com.vanipy.mata.CapturePipelineTest /tmp/live-instrument.log 600 -e queue_url "$QUEUE_URL"; then
+if ! run_instrumented com.vanipy.bidik.CapturePipelineTest /tmp/live-instrument.log 600 -e queue_url "$QUEUE_URL"; then
   echo "live-site integration attempt failed: external network from the CI emulator remains unproven; not gating"
 fi
 
 mkdir -p captures
-adb pull /sdcard/Android/data/com.vanipy.mata/files/captures captures
+adb pull /sdcard/Android/data/com.vanipy.bidik/files/captures captures
 if ! find captures -type f -name '*.png' -print -quit | grep -q .; then
   echo "ERROR: emulator capture directory was empty or contained no PNG screenshots" >&2
   exit 1

@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

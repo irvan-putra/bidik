@@ -22,7 +22,7 @@
             android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="com.vanipy.mata.fileprovider"
+            android:authorities="com.vanipy.bidik.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data

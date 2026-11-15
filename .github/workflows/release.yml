@@ -80,11 +80,11 @@ jobs:
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign \
             --ks "$work/ks.jks" --ks-pass "pass:$KEYSTORE_PASSWORD" \
             --ks-key-alias "$KEY_ALIAS" --key-pass "pass:$KEY_PASSWORD" \
-            --out "mata-v$IN_NAME.apk" "$aligned"
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "mata-v$IN_NAME.apk" | head -3
+            --out "bidik-v$IN_NAME.apk" "$aligned"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "bidik-v$IN_NAME.apk" | head -3
           rm -rf "$work"
           git tag "v$IN_NAME"
           git push origin "v$IN_NAME"
-          gh release create "v$IN_NAME" "mata-v$IN_NAME.apk" --title "mata v$IN_NAME" --notes "mata v$IN_NAME"
+          gh release create "v$IN_NAME" "bidik-v$IN_NAME.apk" --title "bidik v$IN_NAME" --notes "bidik v$IN_NAME"
           # direct asset link, no ZIP: version in the filename, early enough not to truncate
           gh release view "v$IN_NAME" --json assets --jq '.assets[].url'

@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import android.annotation.SuppressLint
 import android.app.Activity

@@ -3,10 +3,10 @@ plugins { id 'com.android.application'; id 'com.chaquo.python'; id 'org.jetbrain
 android {
     testOptions { unitTests { includeAndroidResources = true } }
     buildFeatures { buildConfig true }
-    namespace 'com.vanipy.mata' // application namespace
+    namespace 'com.vanipy.bidik' // application namespace
     compileSdk 34
     defaultConfig {
-        applicationId 'com.vanipy.mata'
+        applicationId 'com.vanipy.bidik'
         minSdk 26
         targetSdk 34
         // AndroidJUnitRunner is required for Gradle to discover the JUnit4

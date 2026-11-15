@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import android.graphics.BitmapFactory
 import androidx.test.ext.junit.rules.ActivityScenarioRule

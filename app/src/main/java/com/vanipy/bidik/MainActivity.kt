@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import android.app.AlertDialog
 import android.os.Bundle
@@ -13,7 +13,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
-import com.vanipy.mata.bot.DcQueueTransport
+import com.vanipy.bidik.bot.DcQueueTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -305,11 +305,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     internal fun shareDiagnostics() {
-        val export = File(cacheDir, "diagnostics/mata-diagnostics.txt")
+        val export = File(cacheDir, "diagnostics/bidik-diagnostics.txt")
         export.parentFile?.mkdirs()
         export.writeText(DiagLog.fullText(this))
         val uri = androidx.core.content.FileProvider.getUriForFile(
-            this, "com.vanipy.mata.fileprovider", export
+            this, "com.vanipy.bidik.fileprovider", export
         )
         val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
             type = "text/plain"

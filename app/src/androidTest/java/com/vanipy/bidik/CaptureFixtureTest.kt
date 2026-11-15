@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import android.graphics.BitmapFactory
 import androidx.test.ext.junit.rules.ActivityScenarioRule
@@ -37,9 +37,9 @@ class CaptureFixtureTest {
     private var port: Int = 0
 
     private val fixtureHtml = """
-        <html><head><title>mata-fixture</title></head>
+        <html><head><title>bidik-fixture</title></head>
         <body style="background:#ffffff;margin:0">
-          <h1 style="color:#111111">mata fixture page</h1>
+          <h1 style="color:#111111">bidik fixture page</h1>
           <div style="width:200px;height:80px;background:#c00000"></div>
           <div style="width:200px;height:80px;background:#00c000"></div>
           <div style="width:200px;height:80px;background:#0000c0"></div>
@@ -144,7 +144,7 @@ class CaptureFixtureTest {
         }
         val job = QueueProtocol.PageJob("ci-fixture", "http://127.0.0.1:$port/", waitMs = 500)
         val out = WebViewCaptureEngine(activity).capture(job, outDir)
-        assertEquals("fixture title proves a real DOM rendered", "mata-fixture", out.pageTitle)
+        assertEquals("fixture title proves a real DOM rendered", "bidik-fixture", out.pageTitle)
 
         val bmp = BitmapFactory.decodeFile(out.viewportPng.absolutePath)!!
         val colors = HashSet<Int>()

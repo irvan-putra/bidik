@@ -1,6 +1,6 @@
 # Security notes
 
-Threat model and guardrails for mata. The app receives a page queue over a
+Threat model and guardrails for bidik. The app receives a page queue over a
 messaging channel and sends screenshots back to one paired contact. The
 main risks are a hostile or malformed queue and accidental leakage of
 private content into captures.

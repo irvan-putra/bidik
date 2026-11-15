@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate mata launcher icons with the version badged on the icon.
+"""Generate bidik launcher icons with the version badged on the icon.
 
 Release builds show the version on the launcher icon, readable inside
 the icon safe area. This script regenerates the mipmap

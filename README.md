@@ -1,4 +1,4 @@
-# mata
+# bidik
 
 An Android companion for reviewing web pages on a real phone: open the
 app, it picks up a queue of pages to look at, captures the screens, and
@@ -76,7 +76,7 @@ followed by a run summary. See `QueueProtocol.kt` for the exact shape.
 ## Releases
 
 Manual GitHub Actions release (draft): version stamp, icon badge, tag,
-signed APK named `mata-vX.Y.Z.apk` as a direct release asset. The signing
+signed APK named `bidik-vX.Y.Z.apk` as a direct release asset. The signing
 keystore is created once and stored in GitHub Actions secrets (write-only)
 through the repo's release custodian; the secret names are documented in
 release.yml. An in-app updater that pulls new releases automatically is a

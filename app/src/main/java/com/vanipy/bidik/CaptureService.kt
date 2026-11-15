@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import android.app.Activity
 import kotlinx.coroutines.Dispatchers

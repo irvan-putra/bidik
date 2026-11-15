@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import org.json.JSONArray
 import org.json.JSONObject

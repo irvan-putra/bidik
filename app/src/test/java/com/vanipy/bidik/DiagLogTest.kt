@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import androidx.test.core.app.ApplicationProvider
 import org.json.JSONObject

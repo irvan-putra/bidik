@@ -1,4 +1,4 @@
-package com.vanipy.mata
+package com.vanipy.bidik
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -48,7 +48,7 @@ class MainActivityRenderTest {
         root.layout(0, 0, w, h)
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         root.draw(Canvas(bmp))
-        val out = File("/tmp/mata-main-activity.png")
+        val out = File("/tmp/bidik-main-activity.png")
         FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         assertTrue("render missing: $out", out.exists() && out.length() > 5_000)
 
@@ -100,7 +100,7 @@ class MainActivityRenderTest {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         bmp.eraseColor(android.graphics.Color.WHITE)
         box.draw(Canvas(bmp))
-        val out = File("/tmp/mata-setup-full.png")
+        val out = File("/tmp/bidik-setup-full.png")
         FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         assertTrue("render missing: $out", out.exists() && out.length() > 5_000)
     }

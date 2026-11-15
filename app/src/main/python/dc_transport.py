@@ -1,4 +1,4 @@
-"""DeltaChat transport for mata (gated; account creation is explicit setup only).
+"""DeltaChat transport for bidik (gated; account creation is explicit setup only).
 
 Runs the app-side half of the queue/result exchange over DeltaChat:
 
@@ -26,7 +26,7 @@ import json
 import logging
 import os
 
-log = logging.getLogger("mata.dc_transport")
+log = logging.getLogger("bidik.dc_transport")
 
 STATE_FILE = "dc_transport_state.json"
 QUEUE_TYPE = "capture-queue"
@@ -198,7 +198,7 @@ def provision(native_lib_dir, files_dir, relay):
         if not addr:
             raise RuntimeError("account configured but its address is unreadable")
         save_state(files_dir, provisioned=True, self_addr=addr)
-        log.info("mata transport account created")
+        log.info("bidik transport account created")
         return addr
     finally:
         rpc.close()

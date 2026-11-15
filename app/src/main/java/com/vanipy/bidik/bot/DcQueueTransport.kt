@@ -1,10 +1,10 @@
-package com.vanipy.mata.bot
+package com.vanipy.bidik.bot
 
 import android.content.Context
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
-import com.vanipy.mata.QueueProtocol
-import com.vanipy.mata.QueueTransport
+import com.vanipy.bidik.QueueProtocol
+import com.vanipy.bidik.QueueTransport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
