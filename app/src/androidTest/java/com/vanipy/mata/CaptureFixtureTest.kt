@@ -2,6 +2,7 @@ package com.vanipy.mata
 
 import android.graphics.BitmapFactory
 import androidx.test.ext.junit.rules.ActivityScenarioRule
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -45,11 +46,27 @@ class CaptureFixtureTest {
         </body></html>
     """.trimIndent()
 
+    // Request-side evidence, readable from adb without run-as: did the
+    // WebView's connection ever REACH the fixture server, and was a
+    // response fully served? Bounded lines only: "accept" / "served".
+    private fun serverEvidence(): File =
+        InstrumentationRegistry.getInstrumentation().targetContext
+            .getExternalFilesDir(null)!!.resolve("captures").apply { mkdirs() }
+            .resolve("fixture-server.log")
+
     @Before
     fun startFixtureServer() {
         server = ServerSocket(0)
         port = server.localPort
         UrlGuard.allowLoopbackForTests = true
+        serverEvidence().delete()
+        // Effective platform config evidence, from the documented public
+        // API, recorded test-side only (not logged in production builds).
+        runCatching {
+            val permitted = android.security.NetworkSecurityPolicy.getInstance()
+                .isCleartextTrafficPermitted("127.0.0.1")
+            serverEvidence().appendText("cleartext_loopback=${if (permitted) 1 else 0}\n")
+        }
         thread(isDaemon = true) {
             while (!server.isClosed) {
                 val sock = try {
@@ -57,6 +74,7 @@ class CaptureFixtureTest {
                 } catch (_: Exception) {
                     break
                 }
+                serverEvidence().appendText("accept\n")
                 // Each connection is served on its own daemon thread:
                 // Chromium opens speculative connections that may never
                 // send a request, and a single sequential accept loop
@@ -84,6 +102,7 @@ class CaptureFixtureTest {
                                 write(body)
                                 flush()
                             }
+                            serverEvidence().appendText("served\n")
                         }
                     } catch (_: Exception) {
                         // Idle or aborted speculative connection; nothing to serve.
@@ -97,6 +116,17 @@ class CaptureFixtureTest {
     fun stopFixtureServer() {
         UrlGuard.allowLoopbackForTests = false
         server.close()
+        // The test runs inside the app process, so it can export the
+        // self-sanitized DiagLog to the sdcard captures dir for CI
+        // retrieval - no run-as needed (broken on some emulator images).
+        runCatching {
+            val c = InstrumentationRegistry.getInstrumentation().targetContext
+            val out = c.getExternalFilesDir(null)!!.resolve("captures").apply { mkdirs() }
+            listOf("events.log", "events-prev.log").forEach { name ->
+                val f = File(c.filesDir, "logs/$name")
+                if (f.exists()) f.copyTo(out.resolve("diag-$name"), overwrite = true)
+            }
+        }
     }
 
     private fun withActivity(block: (MainActivity) -> Unit) {

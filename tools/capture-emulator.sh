@@ -75,6 +75,16 @@ if [ $rc -ne 0 ]; then
   # Self-diagnosing: an empty section must distinguish "no log written"
   # from "run-as itself failed", so run-as errors are shown (URLs
   # stripped), not suppressed.
+  echo "== device/app/webview identity ==" >&2
+  adb shell 'pm path com.vanipy.mata' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
+  adb shell 'dumpsys package com.vanipy.mata | grep -iE "versionName|DEBUGGABLE|pkgFlags"' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
+  adb shell 'dumpsys webviewupdate' 2>&1 | grep -iE 'package|version|valid' | head -5 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
+  echo "== merged manifest network config (host build output) ==" >&2
+  find app/build/intermediates -name AndroidManifest.xml -path '*debug*' 2>/dev/null | while read -r m; do grep -l networkSecurityConfig "$m" 2>/dev/null; done | head -3 >&2 || true
+  echo "== fixture server evidence ==" >&2
+  adb shell 'cat /sdcard/Android/data/com.vanipy.mata/files/captures/fixture-server.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -20 >&2 || true
+  echo "== exported on-device diagnostics (no run-as) ==" >&2
+  adb shell 'cat /sdcard/Android/data/com.vanipy.mata/files/captures/diag-events-prev.log /sdcard/Android/data/com.vanipy.mata/files/captures/diag-events.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -80 >&2 || true
   adb shell 'run-as com.vanipy.mata echo diag-dump-marker' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
   adb shell 'run-as com.vanipy.mata ls -la files/logs/' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
   adb shell 'run-as com.vanipy.mata cat files/logs/events-prev.log files/logs/events.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -80 >&2 || true
