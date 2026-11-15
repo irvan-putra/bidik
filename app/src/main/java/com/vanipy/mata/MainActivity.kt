@@ -1,5 +1,6 @@
 package com.vanipy.mata
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -80,18 +81,42 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun currentTransport(): QueueTransport {
+    private var transport: QueueTransport? = null
+
+    // One transport instance per pairing state. DcQueueTransport keeps
+    // run-scoped state (lastQueueId) that finishRun needs; building a
+    // fresh instance per call silently dropped the run ledger, so
+    // record_queue_outcome never ran.
+    internal fun currentTransport(): QueueTransport {
+        transport?.let { return it }
         val peer = SetupController.peerAddr(this)
-        return if (SetupController.isPaired(this) && peer != null) {
+        val t = if (SetupController.isPaired(this) && peer != null) {
             DcQueueTransport(this, peer)
         } else {
             LocalQueueTransport(filesDir)
         }
+        transport = t
+        return t
     }
 
     private fun renderSetup() {
         setupBox.removeAllViews()
         if (SetupController.isPaired(this)) {
+            setupBox.addView(Button(this).apply {
+                text = "Unpair"
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setMessage("Stop syncing with this contact? The messaging account and past captures stay on this phone.")
+                        .setPositiveButton("Unpair") { _, _ ->
+                            SetupController.unpair(this@MainActivity)
+                            transport = null
+                            renderSetup()
+                            refreshList()
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            })
             setupBox.addView(TextView(this).apply {
                 text = "paired: ${SetupController.peerAddr(this@MainActivity)}"
             })
@@ -146,6 +171,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val addr = SetupController.completePairing(this@MainActivity, qrText)
                 status.text = "paired: $addr"
+                transport = null
                 renderSetup()
                 refreshList { runCapture() }
             } catch (e: Exception) {
