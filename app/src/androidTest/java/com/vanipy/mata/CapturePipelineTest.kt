@@ -23,6 +23,16 @@ import java.io.File
  *  2. Pipeline wiring: the queue file drives a run, result JSON and PNGs
  *     land where the transport expects them.
  *
+ * Threading: WebViewCaptureEngine.capture dispatches onto
+ * Dispatchers.Main, so the coroutine must be started from a NON-main
+ * thread. JUnit runs test bodies on the instrumentation thread, which is
+ * fine; wrapping the call in scenario.onActivity { runBlocking { ... } }
+ * blocks the main thread and deadlocks the load permanently. Keep
+ * onActivity only for grabbing references.
+ *
+ * Timeouts: every test carries an explicit JUnit timeout so a blocked
+ * run fails in minutes instead of hanging the job until the CI timeout.
+ *
  * Fixture URL defaults to example.com (stable, deterministic); CI passes
  * the public page under review via instrumentation arg "queue_url" and a
  * human inspects the uploaded artifacts.
@@ -37,17 +47,22 @@ class CapturePipelineTest {
         InstrumentationRegistry.getArguments().getString("queue_url")
             ?: "https://example.com/"
 
-    @Test
+    /** Reference grab only - never block or capture inside onActivity. */
+    private fun withActivity(block: (MainActivity) -> Unit) {
+        activityRule.scenario.onActivity(block)
+    }
+
+    @Test(timeout = 180_000)
     fun captureCarriesRecognizablePageContent() = runBlocking {
-        var output: WebViewCaptureEngine.CaptureOutput? = null
-        var outDir: File? = null
-        activityRule.scenario.onActivity { activity ->
-            outDir = activity.getExternalFilesDir(null)!!.resolve("captures")
-            outDir!!.mkdirs()
-            val job = QueueProtocol.PageJob("ci-page", queueUrl(), waitMs = 2000)
-            runBlocking { output = WebViewCaptureEngine(activity).capture(job, outDir!!) }
+        lateinit var activity: MainActivity
+        lateinit var outDir: File
+        withActivity { a ->
+            activity = a
+            outDir = a.getExternalFilesDir(null)!!.resolve("captures")
+            outDir.mkdirs()
         }
-        val out = output!!
+        val job = QueueProtocol.PageJob("ci-page", queueUrl(), waitMs = 2000)
+        val out = WebViewCaptureEngine(activity).capture(job, outDir)
         assertTrue("empty page title - did a real page render?", out.pageTitle.isNotBlank())
 
         val bmp = BitmapFactory.decodeFile(out.viewportPng.absolutePath)!!
@@ -73,24 +88,23 @@ class CapturePipelineTest {
         assertTrue("no dark pixels in $samples samples - likely blank page", dark > 0)
     }
 
-    @Test
+    @Test(timeout = 180_000)
     fun queueFileDrivesRunAndResults() = runBlocking {
-        var outcome: CaptureRunner.RunOutcome? = null
-        var filesDir: File? = null
-        var outDir: File? = null
-        activityRule.scenario.onActivity { activity ->
-            filesDir = activity.filesDir
-            outDir = activity.getExternalFilesDir(null)!!.resolve("captures")
-            File(filesDir, "capture-queue.json").writeText(
+        lateinit var activity: MainActivity
+        lateinit var outDir: File
+        withActivity { a ->
+            activity = a
+            outDir = a.getExternalFilesDir(null)!!.resolve("captures")
+            File(a.filesDir, "capture-queue.json").writeText(
                 """{"type":"capture-queue","v":1,"pages":[
                   {"id":"ci-page","url":"${queueUrl()}","mode":"webview","full_page":true,"wait_ms":2000}
                 ]}"""
             )
-            runBlocking { outcome = CaptureRunner(activity, LocalQueueTransport(filesDir!!), outDir!!).runOnce() }
         }
-        assertEquals("expected 1 ok, failures: ${outcome?.failures}", 1, outcome?.ok)
+        val outcome = CaptureRunner(activity, LocalQueueTransport(activity.filesDir), outDir).runOnce()
+        assertEquals("expected 1 ok, failures: ${outcome.failures}", 1, outcome.ok)
         assertTrue(File(outDir, "ci-page-viewport.png").exists())
-        val result = File(filesDir, "last-result.json").readText()
+        val result = File(activity.filesDir, "last-result.json").readText()
         assertTrue(result.contains("\"capture-result\""))
         assertTrue(result.contains("\"status\":\"ok\""))
     }

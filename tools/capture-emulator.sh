@@ -12,8 +12,19 @@ esac
 # make a zero-test run appear healthy.
 rm -rf app/build/outputs/androidTest-results/connected
 rm -rf captures
-./gradlew -PciEmulator connectedDebugAndroidTest --no-daemon \
+# Bound the instrumented run: a blocked test must fail in minutes with
+# diagnostic evidence, not hang until the job timeout (a previous run sat
+# 28 minutes on "Starting 2 tests" with no instrumentation output).
+set +e
+timeout -k 30 900 ./gradlew -PciEmulator connectedDebugAndroidTest --no-daemon \
   -Pandroid.testInstrumentationRunnerArguments.queue_url="$QUEUE_URL"
+rc=$?
+set -e
+if [ $rc -ne 0 ]; then
+  echo "connectedDebugAndroidTest failed or exceeded its 900s bound (rc=$rc); last logcat:" >&2
+  adb logcat -d -t 300 >&2 || true
+  exit 1
+fi
 
 # Gradle may report BUILD SUCCESSFUL even if no instrumentation tests were
 # discovered. Require a fresh XML report with at least one executed test.
