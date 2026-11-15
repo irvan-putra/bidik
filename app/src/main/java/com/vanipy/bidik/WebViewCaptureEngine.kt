@@ -109,6 +109,15 @@ class WebViewCaptureEngine(private val activity: Activity) {
                         loaded.complete(false)
                     }
                 }
+
+                override fun onRenderProcessGone(
+                    view: WebView, detail: android.webkit.RenderProcessGoneDetail
+                ): Boolean {
+                    // Diagnostic only: record renderer death (crash vs system
+                    // kill), then keep the platform's default handling.
+                    DiagLog.log(activity, "capture", "render_gone", detail = "crashed=${detail.didCrash()}")
+                    return false
+                }
             }
             webView.webChromeClient = WebChromeClient()
             webView.loadUrl(job.url)
