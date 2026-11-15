@@ -63,17 +63,8 @@ jobs:
           # DeltaChat runtime is never started in this test.
           # Captures are pulled INSIDE this script while the emulator is
           # still alive; a later step would find the device stopped.
-          script: |
-            set -euo pipefail
-            case "$QUEUE_URL" in
-              https://*) ;;
-              *) echo "queue_url must be a public https URL, got: $QUEUE_URL"; exit 1 ;;
-            esac
-            ./gradlew -PciAllAbis connectedDebugAndroidTest --no-daemon \
-              -Pandroid.testInstrumentationRunnerArguments.queue_url="$QUEUE_URL"
-            mkdir -p captures
-            adb pull /sdcard/Android/data/com.vanipy.mata/files/captures captures
-            ls -laR captures
+          # The pinned action runs each script line in its own sh process; use one helper invocation.
+          script: sh tools/capture-emulator.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: capture-pixels
