@@ -195,8 +195,8 @@ if ! find captures -type f -name '*.png' -print -quit | grep -q .; then
   echo "ERROR: emulator capture directory was empty or contained no PNG screenshots" >&2
   exit 1
 fi
-if [ ! -s captures/ci-fixture-viewport.png ]; then
-  echo "ERROR: expected CI fixture capture captures/ci-fixture-viewport.png was missing or empty" >&2
+if [ ! -s captures/ci-fixture-pipeline-viewport.png ]; then
+  echo "ERROR: expected CI fixture capture captures/ci-fixture-pipeline-viewport.png was missing or empty" >&2
   exit 1
 fi
 ls -laR captures

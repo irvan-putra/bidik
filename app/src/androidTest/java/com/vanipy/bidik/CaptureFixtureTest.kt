@@ -27,7 +27,11 @@ import kotlin.concurrent.thread
  * integration coverage. The loopback escape (UrlGuard.allowLoopbackForTests)
  * is set only around these tests.
  */
+// Deterministic order (pipeline first) for the first-capture-of-process
+// investigation (run 43700290831: first capture drew uniform, second drew
+// correctly). Distinct job ids keep both captures' pixels in the artifact.
 @RunWith(AndroidJUnit4::class)
+@org.junit.FixMethodOrder(org.junit.runners.MethodSorters.NAME_ASCENDING)
 class CaptureFixtureTest {
 
     @get:Rule
@@ -139,7 +143,7 @@ class CaptureFixtureTest {
     }
 
     @Test(timeout = 120_000)
-    fun captureFixtureCarriesRecognizableContent() = runBlocking {
+    fun test2_directEngineCaptureCarriesRecognizableContent() = runBlocking {
         lateinit var activity: MainActivity
         lateinit var outDir: File
         withActivity { a ->
@@ -147,7 +151,7 @@ class CaptureFixtureTest {
             outDir = a.getExternalFilesDir(null)!!.resolve("captures")
             outDir.mkdirs()
         }
-        val job = QueueProtocol.PageJob("ci-fixture", "http://127.0.0.1:$port/", waitMs = 500)
+        val job = QueueProtocol.PageJob("ci-fixture-direct", "http://127.0.0.1:$port/", waitMs = 500)
         val out = WebViewCaptureEngine(activity).capture(job, outDir)
         assertEquals("fixture title proves a real DOM rendered", "bidik-fixture", out.pageTitle)
 
@@ -173,7 +177,7 @@ class CaptureFixtureTest {
     }
 
     @Test(timeout = 120_000)
-    fun queueFileDrivesFixtureRunAndResults() = runBlocking {
+    fun test1_queueFileDrivesFixtureRunAndResults() = runBlocking {
         lateinit var activity: MainActivity
         lateinit var outDir: File
         withActivity { a ->
@@ -181,13 +185,13 @@ class CaptureFixtureTest {
             outDir = a.getExternalFilesDir(null)!!.resolve("captures")
             File(a.filesDir, "capture-queue.json").writeText(
                 """{"type":"capture-queue","v":1,"pages":[
-                  {"id":"ci-fixture","url":"http://127.0.0.1:$port/","mode":"webview","full_page":false,"wait_ms":500}
+                  {"id":"ci-fixture-pipeline","url":"http://127.0.0.1:$port/","mode":"webview","full_page":false,"wait_ms":500}
                 ]}"""
             )
         }
         val outcome = CaptureRunner(activity, LocalQueueTransport(activity.filesDir), outDir).runOnce()
         assertEquals("expected 1 ok, failures: ${outcome.failures}", 1, outcome.ok)
-        assertTrue(File(outDir, "ci-fixture-viewport.png").exists())
+        assertTrue(File(outDir, "ci-fixture-pipeline-viewport.png").exists())
         val result = File(activity.filesDir, "last-result.json").readText()
         assertTrue(result.contains("\"capture-result\""))
         assertTrue(result.contains("\"status\":\"ok\""))
