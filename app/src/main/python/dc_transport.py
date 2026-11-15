@@ -216,13 +216,23 @@ def _complete_pairing_impl(acct, files_dir, qr_text, timeout_secs=180):
     import time
     from queue import Empty
     acct.start_io()
+    # Drop any event from before this attempt so a stale or unrelated
+    # SecurejoinJoinerProgress can never satisfy the wait below.
+    acct._rpc.clear_all_events(acct.id)
     chat = acct.secure_join(qr_text)
-    # Bounded wait for the joiner-side handshake event. Snapshot fields
-    # are NOT a valid signal: the 2.69 basic chat snapshot has no
-    # is_protected key at all, and its is_encrypted is True even on the
-    # self chats. SecurejoinJoinerProgress == 1000 is the real one.
-    # rpc.get_queue(account_id) is a local event queue, so a timeout
-    # here costs no rpc round trip.
+    contacts = chat.get_contacts()
+    if len(contacts) != 1:
+        raise RuntimeError(
+            "join chat has %d contacts, expected exactly 1" % len(contacts))
+    peer_id = contacts[0].id
+    # Bounded wait for THIS join's completion. Snapshot fields are NOT a
+    # valid signal: the 2.69 basic chat snapshot has no is_protected key
+    # at all, and its is_encrypted is True even on the self chats. The
+    # completion event is SecurejoinJoinerProgress with progress == 1000
+    # AND contactId == this join chat's contact (runtime-verified: the
+    # event payload is {"contactId": N, "kind": ..., "progress": ...}).
+    # Anything else - other progress values, other contacts, events that
+    # predate the scan - is ignored.
     events = acct._rpc.get_queue(acct.id)
     deadline = time.time() + timeout_secs
     while True:
@@ -234,16 +244,13 @@ def _complete_pairing_impl(acct, files_dir, qr_text, timeout_secs=180):
         except Empty:
             continue
         if (event or {}).get("kind") == "SecurejoinJoinerProgress" \
-                and event.get("progress") == 1000:
+                and event.get("progress") == 1000 \
+                and event.get("contactId") == peer_id:
             break
-    contacts = chat.get_contacts()
-    if len(contacts) != 1:
-        raise RuntimeError(
-            "paired chat has %d contacts, expected exactly 1" % len(contacts))
     addr = getattr(contacts[0].get_snapshot(), "address", None)
     if not addr:
         raise RuntimeError("paired peer contact has no readable address")
-    save_state(files_dir, peer_contact_id=contacts[0].id, peer_addr=addr)
+    save_state(files_dir, peer_contact_id=peer_id, peer_addr=addr)
     return {"status": "ok", "peer_addr": addr}
 
 

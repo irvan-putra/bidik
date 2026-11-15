@@ -161,9 +161,18 @@ class FakePairChat:
 class _FakeRpc:
     def __init__(self, events):
         self._events = events
+        self.cleared = False
 
     def get_queue(self, account_id):
         return self._events
+
+    def clear_all_events(self, account_id):
+        self.cleared = True
+        while True:
+            try:
+                self._events.get_nowait()
+            except Exception:
+                return
 
 
 class FakeAcct:
@@ -177,7 +186,8 @@ class FakeAcct:
         self.pair_chat = FakePairChat()
         self.scanned_qrs = []
         self.events = _q.Queue()
-        self.events.put({"kind": "SecurejoinJoinerProgress", "progress": 1000})
+        self.events.put({"kind": "SecurejoinJoinerProgress",
+                         "progress": 1000, "contactId": 42})
         self._rpc = _FakeRpc(self.events)
 
     def start_io(self):
@@ -247,6 +257,18 @@ class CompletePairingTest(unittest.TestCase):
         self.dir.cleanup()
 
     def test_stores_peer_contact_id_and_addr(self):
+        # The pre-scan clear drains anything enqueued before the attempt,
+        # so deliver this join's completion event right after the clear.
+        rpc = _FakeRpc(self.acct.events)
+        original_clear = rpc.clear_all_events
+
+        def clear_then_deliver(account_id):
+            original_clear(account_id)
+            self.acct.events.put({"kind": "SecurejoinJoinerProgress",
+                                  "progress": 1000, "contactId": 42})
+
+        rpc.clear_all_events = clear_then_deliver
+        self.acct._rpc = rpc
         res = t._complete_pairing_impl(self.acct, self.dir.name, "dcaccount:fake-qr")
         self.assertEqual(res["status"], "ok")
         self.assertEqual(res["peer_addr"], "peer@example.com")
@@ -254,6 +276,7 @@ class CompletePairingTest(unittest.TestCase):
         self.assertEqual(st["peer_contact_id"], 42)
         self.assertEqual(st["peer_addr"], "peer@example.com")
         self.assertEqual(self.acct.scanned_qrs, ["dcaccount:fake-qr"])
+        self.assertTrue(rpc.cleared)
 
     def test_unfinished_handshake_times_out(self):
         import queue as _q
@@ -261,6 +284,33 @@ class CompletePairingTest(unittest.TestCase):
         self.acct._rpc = _FakeRpc(self.acct.events)
         with self.assertRaises(RuntimeError):
             t._complete_pairing_impl(self.acct, self.dir.name, "qr", timeout_secs=0)
+
+    def test_unrelated_completion_event_never_satisfies_wait(self):
+        # A progress-1000 event for a DIFFERENT contact must not complete
+        # this join. It is re-enqueued after the pre-scan event clear so
+        # the contactId filter (not just the clear) is what rejects it.
+        rpc = _FakeRpc(self.acct.events)
+        original_clear = rpc.clear_all_events
+
+        def clear_then_poison(account_id):
+            original_clear(account_id)
+            self.acct.events.put({"kind": "SecurejoinJoinerProgress",
+                                  "progress": 1000, "contactId": 999})
+
+        rpc.clear_all_events = clear_then_poison
+        self.acct._rpc = rpc
+        with self.assertRaises(RuntimeError):
+            t._complete_pairing_impl(self.acct, self.dir.name, "qr", timeout_secs=1)
+        self.assertTrue(rpc.cleared)
+
+    def test_progress_below_1000_does_not_complete(self):
+        import queue as _q
+        self.acct.events = _q.Queue()
+        self.acct.events.put({"kind": "SecurejoinJoinerProgress",
+                              "progress": 400, "contactId": 42})
+        self.acct._rpc = _FakeRpc(self.acct.events)
+        with self.assertRaises(RuntimeError):
+            t._complete_pairing_impl(self.acct, self.dir.name, "qr", timeout_secs=1)
 
 
 class SendResultTest(unittest.TestCase):
