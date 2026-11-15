@@ -8,7 +8,7 @@ case "$QUEUE_URL" in
   *) echo "queue_url must be a public https URL, got: $QUEUE_URL"; exit 1 ;;
 esac
 
-./gradlew -PciAllAbis connectedDebugAndroidTest --no-daemon \
+./gradlew -PciEmulator connectedDebugAndroidTest --no-daemon \
   -Pandroid.testInstrumentationRunnerArguments.queue_url="$QUEUE_URL"
 mkdir -p captures
 adb pull /sdcard/Android/data/com.vanipy.mata/files/captures captures

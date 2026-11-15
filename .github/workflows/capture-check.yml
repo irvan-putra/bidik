@@ -59,7 +59,7 @@ jobs:
           # default = AOSP image, enough for a WebView capture check.
           target: default
           arch: x86_64
-          # ciAllAbis drops the arm64-only filter for the emulator; the
+          # -PciEmulator selects the x86_64 ABI for the emulator; the
           # DeltaChat runtime is never started in this test.
           # Captures are pulled INSIDE this script while the emulator is
           # still alive; a later step would find the device stopped.
