@@ -39,6 +39,7 @@ object DiagLog {
             Regex("pages=\\d+"),
             Regex("stage=(?:queue|capture)"),
             Regex("ok=\\d+ failed=\\d+"),
+            Regex("code=-?\\d+"),
         )
         return if (allowed.any { it.matches(detail) } || detail == "already in progress") {
             detail

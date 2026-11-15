@@ -66,6 +66,11 @@ if [ $rc -ne 0 ]; then
   # the generic test failure alone does not. Bounded to the last matches.
   echo "== filtered logcat: platform network/webview errors ==" >&2
   adb logcat -d -b all | grep -iE 'cleartext|ERR_|net::|NetworkSecurity' | sed -E 's#https?://[^ ]*#[url]#g' | tail -50 >&2 || true
+  # The app's own diagnostics log is self-sanitized by DiagLog (bounded
+  # categories/counters only) and says exactly which WebView callback
+  # fired: page_started, page_error (with bounded code), page_timeout.
+  echo "== on-device diagnostics log ==" >&2
+  adb shell run-as com.vanipy.mata sh -c 'cat files/logs/events-prev.log files/logs/events.log 2>/dev/null' | tail -80 >&2 || true
   exit 1
 fi
 

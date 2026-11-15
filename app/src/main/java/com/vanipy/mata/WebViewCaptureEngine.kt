@@ -86,7 +86,14 @@ class WebViewCaptureEngine(private val activity: Activity) {
                     view: WebView, request: WebResourceRequest
                 ): Boolean = !UrlGuard.isAllowed(request.url.toString())
 
+                override fun onPageStarted(
+                    view: WebView, url: String, favicon: android.graphics.Bitmap?
+                ) {
+                    DiagLog.log(activity, "capture", "page_started")
+                }
+
                 override fun onPageFinished(view: WebView, url: String) {
+                    DiagLog.log(activity, "capture", "page_finished")
                     finalUrl = url
                     pageTitle = view.title ?: ""
                     if (!loaded.isCompleted) loaded.complete(true)
@@ -96,6 +103,9 @@ class WebViewCaptureEngine(private val activity: Activity) {
                     view: WebView, request: WebResourceRequest, error: WebResourceError
                 ) {
                     if (request.isForMainFrame && !loaded.isCompleted) {
+                        // Bounded platform error code only; never the URL or
+                        // the platform's free-form error text.
+                        DiagLog.log(activity, "capture", "page_error", detail = "code=${error.errorCode}")
                         loaded.complete(false)
                     }
                 }
@@ -105,7 +115,10 @@ class WebViewCaptureEngine(private val activity: Activity) {
 
             val ok = withTimeoutOrNull(30_000) { loaded.await() } ?: false
             val loadMs = System.currentTimeMillis() - loadStart
-            if (!ok) throw CaptureException("page load failed or timed out: ${job.url}")
+            if (!ok) {
+                DiagLog.log(activity, "capture", "page_timeout")
+                throw CaptureException("page load failed or timed out: ${job.url}")
+            }
 
             // Settle: wait for readyState complete + images decoded, then the
             // per-page wait budget (dynamic pages keep mutating after load).

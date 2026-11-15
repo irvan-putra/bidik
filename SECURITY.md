@@ -29,8 +29,9 @@ private content into captures.
 - **Diagnostics without secrets.** The app keeps an on-device log
   (`filesDir/logs/events.log`, one rotated previous generation) of stage
   names, timings, counters and bounded error categories, so a failing run says
-  which step failed. The log stores bounded error categories, page
-  ordinals, timings and counters only; arbitrary URLs, hostnames, page
+  which step failed. The log stores bounded error categories, bounded
+  platform error codes, page ordinals, timings and counters only;
+  arbitrary URLs, hostnames, page
   identifiers, exception text, keys, pairing QR payloads, message
   contents and captured page data are omitted. The log leaves the
   phone only via the explicit Share action in the Diagnostics view.
