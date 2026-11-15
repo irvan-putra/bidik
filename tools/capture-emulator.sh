@@ -41,6 +41,10 @@ set -e
 if [ $rc -ne 0 ]; then
   echo "fixture capture run failed or exceeded its 900s bound (rc=$rc); last logcat:" >&2
   adb logcat -d -t 300 >&2 || true
+  # Platform network errors (e.g. cleartext denial) name the real cause;
+  # the generic test failure alone does not. Bounded to the last matches.
+  echo "== filtered logcat: platform network/webview errors ==" >&2
+  adb logcat -d -b all | grep -iE 'cleartext|ERR_|net::|NetworkSecurity' | tail -50 >&2 || true
   exit 1
 fi
 

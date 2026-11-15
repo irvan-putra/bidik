@@ -52,28 +52,42 @@ class CaptureFixtureTest {
         UrlGuard.allowLoopbackForTests = true
         thread(isDaemon = true) {
             while (!server.isClosed) {
-                try {
-                    server.accept().use { sock ->
-                        val reader = sock.getInputStream().bufferedReader()
-                        // Consume request headers.
-                        while (true) {
-                            val line = reader.readLine() ?: break
-                            if (line.isEmpty()) break
-                        }
-                        val body = fixtureHtml.toByteArray()
-                        sock.getOutputStream().apply {
-                            write(
-                                ("HTTP/1.1 200 OK\r\n" +
-                                    "Content-Type: text/html; charset=utf-8\r\n" +
-                                    "Content-Length: ${body.size}\r\n" +
-                                    "Connection: close\r\n\r\n").toByteArray()
-                            )
-                            write(body)
-                            flush()
-                        }
-                    }
+                val sock = try {
+                    server.accept()
                 } catch (_: Exception) {
                     break
+                }
+                // Each connection is served on its own daemon thread:
+                // Chromium opens speculative connections that may never
+                // send a request, and a single sequential accept loop
+                // would starve the real request behind one idle socket.
+                // The socket timeout bounds how long an idle connection
+                // can occupy its thread.
+                thread(isDaemon = true) {
+                    try {
+                        sock.soTimeout = 10_000
+                        sock.use { s ->
+                            val reader = s.getInputStream().bufferedReader()
+                            // Consume request headers.
+                            while (true) {
+                                val line = reader.readLine() ?: break
+                                if (line.isEmpty()) break
+                            }
+                            val body = fixtureHtml.toByteArray()
+                            s.getOutputStream().apply {
+                                write(
+                                    ("HTTP/1.1 200 OK\r\n" +
+                                        "Content-Type: text/html; charset=utf-8\r\n" +
+                                        "Content-Length: ${body.size}\r\n" +
+                                        "Connection: close\r\n\r\n").toByteArray()
+                                )
+                                write(body)
+                                flush()
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // Idle or aborted speculative connection; nothing to serve.
+                    }
                 }
             }
         }

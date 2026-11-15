@@ -34,6 +34,12 @@ private content into captures.
   identifiers, exception text, keys, pairing QR payloads, message
   contents and captured page data are omitted. The log leaves the
   phone only via the explicit Share action in the Diagnostics view.
+- **Debug-only cleartext exception.** Debug builds carry a network
+  security config that permits cleartext HTTP exclusively to loopback
+  hosts (127.0.0.1, localhost) so the instrumented fixture's in-process
+  test server can load in the real WebView. Release builds never merge
+  it: every destination keeps the platform default (cleartext denied),
+  and the UrlGuard private-address block is unchanged in all builds.
 - **Local capture archive.** Every run writes its screenshots to its own
   `captures/run-*` directory in the app-private files dir. Archives are
   kept, never auto-deleted; they leave the phone only via the paired
