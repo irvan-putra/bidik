@@ -146,6 +146,16 @@ run_instrumented() {
   return 0
 }
 
+echo "== pairing/transport gates (account-free) =="
+# Gating guarantees that need no DeltaChat runtime: unpaired open never
+# auto-runs, manual Run uses the local transport only, malformed QR
+# fails unpaired. Part of the gate: a regression here fails the job.
+if ! run_instrumented com.vanipy.bidik.CaptureGatingTest /tmp/gating-instrument.log 600; then
+  echo "gating test run failed or exceeded its 600s bound; last logcat:" >&2
+  adb logcat -d -t 300 >&2 || true
+  exit 1
+fi
+
 echo "== capture gate: loopback fixture =="
 if ! run_instrumented com.vanipy.bidik.CaptureFixtureTest /tmp/fixture-instrument.log 900; then
   echo "fixture capture run failed or exceeded its 900s bound; last logcat:" >&2
