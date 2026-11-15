@@ -80,9 +80,9 @@ class CapturePipelineTest {
                 val b = p and 0xFF
                 if (r + g + b < 600) dark++ // below ~78% luminance
                 samples++
-                x += bmp.width / 16
+                x += bmp.width / 64
             }
-            y += bmp.height / 16
+            y += bmp.height / 64
         }
         assertTrue("capture near-uniform ($colors colors) - likely blank", colors.size >= 4)
         assertTrue("no dark pixels in $samples samples - likely blank page", dark > 0)

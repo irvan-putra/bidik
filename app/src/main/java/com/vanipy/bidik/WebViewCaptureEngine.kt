@@ -154,28 +154,16 @@ class WebViewCaptureEngine(private val activity: Activity) {
             // callback fires when the loaded content has been composited and
             // is ready to draw. Bounded at 5s; on timeout we still attempt
             // the draw rather than fail the capture.
-            val vsStart = System.currentTimeMillis()
             val vsReady = CompletableDeferred<Boolean>()
             webView.postVisualStateCallback(0L, object : WebView.VisualStateCallback() {
                 override fun onComplete(requestId: Long) { vsReady.complete(true) }
             })
-            val vsTimedOut = withTimeoutOrNull(5_000) { vsReady.await() } == null
-            DiagLog.log(
-                activity, "capture", "visual_state",
-                detail = "timeout=$vsTimedOut ms=${System.currentTimeMillis() - vsStart}"
-            )
+            if (withTimeoutOrNull(5_000) { vsReady.await() } == null) {
+                DiagLog.log(activity, "capture", "visual_state_timeout")
+            }
 
             val viewportPng = File(outDir, "${job.id}-viewport.png")
             drawToFile(webView, widthPx, heightPx, viewportPng)
-
-            // Diagnostic only (numbers, never pixels): coarse distinct-color
-            // sample of the drawn frame, to characterize blank/uniform draws
-            // (first-capture-of-process investigation, run 43700290831). Not
-            // a readiness gate and not used to alter capture behavior.
-            DiagLog.log(
-                activity, "capture", "draw_check",
-                detail = "colors=${sampleColors(viewportPng)}"
-            )
 
             var fullPng: File? = null
             if (job.fullPage) {
@@ -249,21 +237,6 @@ class WebViewCaptureEngine(private val activity: Activity) {
      * point; the wait_ms budget defines the capture moment for them, it
      * does not prove the page stopped changing.
      */
-    private fun sampleColors(png: File): Int {
-        val bmp = android.graphics.BitmapFactory.decodeFile(png.absolutePath) ?: return -1
-        val colors = HashSet<Int>()
-        var y = 0
-        while (y < bmp.height) {
-            var x = 0
-            while (x < bmp.width) {
-                colors.add(bmp.getPixel(x, y))
-                x += (bmp.width / 16).coerceAtLeast(1)
-            }
-            y += (bmp.height / 16).coerceAtLeast(1)
-        }
-        return colors.size
-    }
-
     private suspend fun awaitReady(webView: WebView, extraWaitMs: Long) {
         val deadline = System.currentTimeMillis() + 10_000
         while (System.currentTimeMillis() < deadline) {

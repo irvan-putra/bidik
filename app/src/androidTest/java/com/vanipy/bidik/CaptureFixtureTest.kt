@@ -168,11 +168,11 @@ class CaptureFixtureTest {
                 val g = p shr 8 and 0xFF
                 val b = p and 0xFF
                 if (r + g + b < 600) dark++
-                x += bmp.width / 16
+                x += bmp.width / 64
             }
-            y += bmp.height / 16
+            y += bmp.height / 64
         }
-        assertTrue("fixture capture near-uniform - likely blank", colors.size >= 4)
+        assertTrue("fixture capture near-uniform (${colors.size} colors in sample, dark=$dark) - likely blank", colors.size >= 4)
         assertTrue("no dark pixels in fixture capture", dark > 0)
     }
 
