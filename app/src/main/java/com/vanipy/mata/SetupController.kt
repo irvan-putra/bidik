@@ -14,6 +14,7 @@ object SetupController {
     private const val PREFS = "mata"
     private const val KEY_PEER = "peer_addr"
     private const val KEY_PAIRED = "paired"
+    private const val KEY_PROVISIONED = "provisioned"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -22,6 +23,12 @@ object SetupController {
 
     fun isPaired(context: Context): Boolean =
         prefs(context).getBoolean(KEY_PAIRED, false) && peerAddr(context) != null
+
+    /** Account creation gates pairing: the handshake needs the account's
+     *  own transport. The flag is set only after a provision/selfAddress
+     *  call actually confirms the account. */
+    fun isProvisioned(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_PROVISIONED, false)
 
     /**
      * Pair with the assistant by completing its secure-join invite QR.
@@ -71,6 +78,7 @@ object SetupController {
                     relay
                 )
                 .toString()
+                .also { prefs(context).edit().putBoolean(KEY_PROVISIONED, true).apply() }
         }
 
     suspend fun selfAddress(context: Context): String? = withContext(Dispatchers.IO) {
@@ -83,6 +91,7 @@ object SetupController {
                     context.filesDir.absolutePath
                 )
                 .toString()
+                .also { prefs(context).edit().putBoolean(KEY_PROVISIONED, true).apply() }
         } catch (e: Exception) {
             null
         }

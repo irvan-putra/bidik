@@ -120,6 +120,9 @@ class MainActivity : AppCompatActivity() {
             setupBox.addView(TextView(this).apply {
                 text = "paired: ${SetupController.peerAddr(this@MainActivity)}"
             })
+            setupBox.addView(TextView(this).apply {
+                text = "on open: syncs the queue, captures each page, sends results back automatically"
+            })
             return
         }
         val state = TextView(this)
@@ -128,22 +131,35 @@ class MainActivity : AppCompatActivity() {
             val addr = SetupController.selfAddress(this@MainActivity)
             state.text = if (addr != null) "messaging address: $addr" else "messaging not set up"
         }
-        setupBox.addView(Button(this).apply {
-            text = "Create messaging account"
-            setOnClickListener { btn ->
-                btn.isEnabled = false
-                status.text = "creating messaging account..."
-                scope.launch {
-                    try {
-                        val addr = SetupController.provision(this@MainActivity, "nine.testrun.org")
-                        status.text = "account ready"
-                        state.text = "messaging address: $addr"
-                    } catch (e: Exception) {
-                        status.text = "account setup failed: ${e.message}"
-                        btn.isEnabled = true
+        if (!SetupController.isProvisioned(this)) {
+            // Pairing needs the account first: the handshake runs over
+            // the account's own transport, and the peer address comes
+            // back from it.
+            setupBox.addView(TextView(this).apply {
+                text = "step 1: create the messaging account"
+            })
+            setupBox.addView(Button(this).apply {
+                text = "Create messaging account"
+                setOnClickListener { btn ->
+                    btn.isEnabled = false
+                    status.text = "creating messaging account..."
+                    scope.launch {
+                        try {
+                            val addr = SetupController.provision(this@MainActivity, "nine.testrun.org")
+                            status.text = "account ready"
+                            state.text = "messaging address: $addr"
+                            renderSetup()
+                        } catch (e: Exception) {
+                            status.text = "account setup failed: ${e.message}"
+                            btn.isEnabled = true
+                        }
                     }
                 }
-            }
+            })
+            return
+        }
+        setupBox.addView(TextView(this).apply {
+            text = "step 2: pair with the assistant's invite QR"
         })
         setupBox.addView(Button(this).apply {
             text = "Scan pairing QR"
@@ -207,7 +223,12 @@ class MainActivity : AppCompatActivity() {
         progress.visibility = View.VISIBLE
         status.text = "running..."
         scope.launch {
-            val outDir = File(filesDir, "captures")
+            // Every run archives into its own timestamped directory.
+            // Captures are kept, never auto-deleted; they leave the
+            // phone only via the paired transport, and are gone only
+            // when the app's data is cleared.
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+            val outDir = File(filesDir, "captures/run-$stamp")
             val outcome = try {
                 CaptureRunner(this@MainActivity, currentTransport(), outDir).runOnce()
             } catch (e: Exception) {
