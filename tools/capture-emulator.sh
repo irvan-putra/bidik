@@ -26,6 +26,15 @@ while :; do
     echo "device not ready within 420s (boot_completed='$boot', pm='$pmok')" >&2
     exit 1
   fi
+  # 43687078864: the transport can sit in 'offline' for the whole boot
+  # window (adb shell fails with 'device offline'); nudge it back.
+  if adb devices | awk 'NR>1 && $2=="offline" {found=1} END{exit !found}'; then
+    echo "device transport offline; reconnecting" >&2
+    if ! adb reconnect offline >/dev/null 2>&1; then
+      adb kill-server >/dev/null 2>&1 || true
+      adb start-server >/dev/null 2>&1 || true
+    fi
+  fi
   sleep 5
 done
 
