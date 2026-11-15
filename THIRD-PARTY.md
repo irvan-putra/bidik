@@ -19,3 +19,12 @@ runtime can exec it from the app's native library directory.
 
 Per MPL-2.0 section 3.2, this file is how recipients of the executable
 form are informed where the Source Code Form is available.
+
+## zxing-android-embedded
+
+Barcode scanner activity used by the setup screen to scan the pairing
+QR code.
+
+- Gradle dependency: com.journeyapps:zxing-android-embedded:4.3.0
+- License: Apache License 2.0
+- Source: https://github.com/journeyapps/zxing-android-embedded

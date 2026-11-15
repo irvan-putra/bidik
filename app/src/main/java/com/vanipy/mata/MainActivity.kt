@@ -10,6 +10,8 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import com.vanipy.mata.bot.DcQueueTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +39,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
     private lateinit var setupBox: LinearLayout
+
+    private val qrScanner =
+        registerForActivityResult(ScanContract()) { result ->
+            val contents = result.contents
+            if (contents != null) completePairing(contents)
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -112,22 +120,38 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
-        val peerField = EditText(this).apply { hint = "trusted contact address" }
-        setupBox.addView(peerField)
         setupBox.addView(Button(this).apply {
-            text = "Pair"
+            text = "Scan pairing QR"
             setOnClickListener {
-                val addr = peerField.text.toString().trim()
-                if (addr.contains("@")) {
-                    SetupController.pair(this@MainActivity, addr)
-                    status.text = "paired"
-                    renderSetup()
-                    refreshList { runCapture() }
-                } else {
-                    status.text = "enter a full address to pair"
-                }
+                qrScanner.launch(
+                    ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                        .setPrompt("scan the pairing QR")
+                )
             }
         })
+        val qrField = EditText(this).apply { hint = "or paste the pairing QR text" }
+        setupBox.addView(qrField)
+        setupBox.addView(Button(this).apply {
+            text = "Pair from pasted QR"
+            setOnClickListener {
+                val qr = qrField.text.toString().trim()
+                if (qr.isNotEmpty()) completePairing(qr) else status.text = "paste the QR text first"
+            }
+        })
+    }
+
+    private fun completePairing(qrText: String) {
+        status.text = "pairing..."
+        scope.launch {
+            try {
+                val addr = SetupController.completePairing(this@MainActivity, qrText)
+                status.text = "paired: $addr"
+                renderSetup()
+                refreshList { runCapture() }
+            } catch (e: Exception) {
+                status.text = "pairing failed: ${e.message}"
+            }
+        }
     }
 
     private fun refreshList(after: (() -> Unit)? = null) {

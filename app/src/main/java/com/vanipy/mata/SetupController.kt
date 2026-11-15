@@ -23,11 +23,36 @@ object SetupController {
     fun isPaired(context: Context): Boolean =
         prefs(context).getBoolean(KEY_PAIRED, false) && peerAddr(context) != null
 
-    fun pair(context: Context, addr: String) {
+    /**
+     * Pair with the assistant by completing its secure-join invite QR.
+     * Chatmail requires end-to-end encryption, so a typed address can
+     * never be paired with; the QR handshake is the only path. Blocks
+     * until the handshake completes. Returns the paired peer address.
+     */
+    suspend fun completePairing(context: Context, qrText: String): String =
+        withContext(Dispatchers.IO) {
+            if (!Python.isStarted()) Python.start(AndroidPlatform(context))
+            val result = Python.getInstance().getModule("dc_transport")
+                .callAttr(
+                    "complete_pairing",
+                    context.applicationInfo.nativeLibraryDir,
+                    context.filesDir.absolutePath,
+                    qrText.trim()
+                )
+                .toString()
+            recordPairedPeer(context, result)
+        }
+
+    /** Parse the module's pairing result and store the peer. Split out
+     *  so the exact contract with dc_transport.complete_pairing is unit
+     *  testable without a Python runtime. */
+    fun recordPairedPeer(context: Context, resultJson: String): String {
+        val addr = org.json.JSONObject(resultJson).getString("peer_addr")
         prefs(context).edit()
-            .putString(KEY_PEER, addr.trim())
+            .putString(KEY_PEER, addr)
             .putBoolean(KEY_PAIRED, true)
             .apply()
+        return addr
     }
 
     fun unpair(context: Context) {
