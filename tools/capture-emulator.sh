@@ -72,7 +72,12 @@ if [ $rc -ne 0 ]; then
   echo "== on-device diagnostics log ==" >&2
   # Quoting matters: the remote command must be one local argument, or
   # sh -c collapses to a bare 'cat' and silently prints nothing.
-  adb shell 'run-as com.vanipy.mata cat files/logs/events-prev.log files/logs/events.log' 2>/dev/null | tail -80 >&2 || true
+  # Self-diagnosing: an empty section must distinguish "no log written"
+  # from "run-as itself failed", so run-as errors are shown (URLs
+  # stripped), not suppressed.
+  adb shell 'run-as com.vanipy.mata echo diag-dump-marker' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
+  adb shell 'run-as com.vanipy.mata ls -la files/logs/' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' >&2 || true
+  adb shell 'run-as com.vanipy.mata cat files/logs/events-prev.log files/logs/events.log' 2>&1 | sed -E 's#https?://[^ ]*#[url]#g' | tail -80 >&2 || true
   exit 1
 fi
 
