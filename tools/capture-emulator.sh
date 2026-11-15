@@ -43,19 +43,33 @@ wait_ready() {
 }
 
 # 43690400798: the system server died mid-install ('Failure calling
-# service package: Broken pipe'). Retry bounded times, re-waiting for a
-# healthy system between attempts.
-install_with_retry() {
-  apk="$1"
+# service package: Broken pipe'). 43691269603: the retry recovered the
+# install, but the app APK had landed BEFORE the crash and the revived
+# package manager could not resolve the app's activity for the test
+# runner. Install app+test as a pair: any failure re-waits for system
+# health and redoes BOTH, then waits until pm actually resolves the app
+# package before instrumenting.
+install_pair_with_retry() {
+  app_apk=app/build/outputs/apk/debug/app-debug.apk
+  test_apk=app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
   for attempt in 1 2 3; do
-    if adb install -r "$apk"; then
-      return 0
+    if adb install -r "$app_apk" && adb install -r "$test_apk"; then
+      break
     fi
-    echo "install of $apk failed (attempt $attempt/3); re-waiting for system health" >&2
+    echo "install pair failed (attempt $attempt/3); re-waiting for system health" >&2
+    [ "$attempt" = 3 ] && return 1
     wait_ready 180 || return 1
     sleep 10
   done
-  return 1
+  pm_deadline=$(( $(date +%s) + 120 ))
+  while ! adb shell pm path com.vanipy.bidik 2>/dev/null | grep -q '^package:'; do
+    if [ "$(date +%s)" -ge "$pm_deadline" ]; then
+      echo "app package not resolvable 120s after install" >&2
+      return 1
+    fi
+    sleep 5
+  done
+  return 0
 }
 
 echo "== wait for device readiness =="
@@ -100,8 +114,7 @@ echo "== build app + test APKs (host) =="
 # "OK (N tests)" summary in the output.
 run_instrumented() {
   cls="$1"; log="$2"; secs="$3"; shift 3
-  install_with_retry app/build/outputs/apk/debug/app-debug.apk || return 1
-  install_with_retry app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk || return 1
+  install_pair_with_retry || return 1
   set +e
   timeout -k 30 "$secs" adb shell "am instrument -w -e class $cls $* com.vanipy.bidik.test/androidx.test.runner.AndroidJUnitRunner" > "$log" 2>&1
   irc=$?
