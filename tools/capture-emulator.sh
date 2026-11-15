@@ -12,31 +12,55 @@ esac
 # every service up on this unaccelerated runner, and installing the test
 # APK then fails with "Can't find service: package" (observed run
 # 43677737595). Gate on boot_completed AND the package manager serving.
+# Readiness gate, reusable: a dying system server (43690400798, zygote
+# fatal during install) restarts the runtime, so install retries re-enter
+# this wait instead of failing the run outright.
+wait_ready() {
+  secs="$1"
+  deadline=$(( $(date +%s) + secs ))
+  while :; do
+    boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+    pmok=$(adb shell pm path android 2>/dev/null | head -1)
+    if [ "$boot" = "1" ] && [ -n "$pmok" ]; then
+      echo "device ready (boot_completed=1, package service up)"
+      return 0
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "device not ready within ${secs}s (boot_completed='$boot', pm='$pmok')" >&2
+      return 1
+    fi
+    # 43687078864: the transport can sit in 'offline' for the whole boot
+    # window (adb shell fails with 'device offline'); nudge it back.
+    if adb devices | awk 'NR>1 && $2=="offline" {found=1} END{exit !found}'; then
+      echo "device transport offline; reconnecting" >&2
+      if ! adb reconnect offline >/dev/null 2>&1; then
+        adb kill-server >/dev/null 2>&1 || true
+        adb start-server >/dev/null 2>&1 || true
+      fi
+    fi
+    sleep 5
+  done
+}
+
+# 43690400798: the system server died mid-install ('Failure calling
+# service package: Broken pipe'). Retry bounded times, re-waiting for a
+# healthy system between attempts.
+install_with_retry() {
+  apk="$1"
+  for attempt in 1 2 3; do
+    if adb install -r "$apk"; then
+      return 0
+    fi
+    echo "install of $apk failed (attempt $attempt/3); re-waiting for system health" >&2
+    wait_ready 180 || return 1
+    sleep 10
+  done
+  return 1
+}
+
 echo "== wait for device readiness =="
 adb wait-for-device
-ready_deadline=$(( $(date +%s) + 420 ))
-while :; do
-  boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-  pmok=$(adb shell pm path android 2>/dev/null | head -1)
-  if [ "$boot" = "1" ] && [ -n "$pmok" ]; then
-    echo "device ready (boot_completed=1, package service up)"
-    break
-  fi
-  if [ "$(date +%s)" -ge "$ready_deadline" ]; then
-    echo "device not ready within 420s (boot_completed='$boot', pm='$pmok')" >&2
-    exit 1
-  fi
-  # 43687078864: the transport can sit in 'offline' for the whole boot
-  # window (adb shell fails with 'device offline'); nudge it back.
-  if adb devices | awk 'NR>1 && $2=="offline" {found=1} END{exit !found}'; then
-    echo "device transport offline; reconnecting" >&2
-    if ! adb reconnect offline >/dev/null 2>&1; then
-      adb kill-server >/dev/null 2>&1 || true
-      adb start-server >/dev/null 2>&1 || true
-    fi
-  fi
-  sleep 5
-done
+wait_ready 420
 
 # Remove only CI-generated result/output folders so a previous run cannot
 # make a zero-test run appear healthy.
@@ -76,8 +100,8 @@ echo "== build app + test APKs (host) =="
 # "OK (N tests)" summary in the output.
 run_instrumented() {
   cls="$1"; log="$2"; secs="$3"; shift 3
-  adb install -r app/build/outputs/apk/debug/app-debug.apk || return 1
-  adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk || return 1
+  install_with_retry app/build/outputs/apk/debug/app-debug.apk || return 1
+  install_with_retry app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk || return 1
   set +e
   timeout -k 30 "$secs" adb shell "am instrument -w -e class $cls $* com.vanipy.bidik.test/androidx.test.runner.AndroidJUnitRunner" > "$log" 2>&1
   irc=$?
