@@ -59,6 +59,10 @@ jobs:
           # default = AOSP image, enough for a WebView capture check.
           target: default
           arch: x86_64
+          # Keep the action's headless/software-rendering defaults. Pin public
+          # resolvers to test whether guest DNS forwarding caused the last run's
+          # host-resolution failure; the live target remains unchanged.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -dns-server 8.8.8.8,1.1.1.1
           # -PciEmulator selects the x86_64 ABI for the emulator; the
           # DeltaChat runtime is never started in this test.
           # Captures are pulled INSIDE this script while the emulator is

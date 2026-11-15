@@ -12,6 +12,17 @@ esac
 # make a zero-test run appear healthy.
 rm -rf app/build/outputs/androidTest-results/connected
 rm -rf captures
+# External-network preflight: this is the live-network evidence for the
+# run, kept distinct from the capture tests themselves. Diagnostics only
+# - the instrumented tests remain the pass/fail gate.
+echo "== network preflight =="
+host=$(echo "$QUEUE_URL" | sed -E 's#https://([^/]+).*#\1#')
+adb shell getprop net.dns1; adb shell getprop net.dns2 || true
+echo "== ping preflight: resolver IP (ICMP reachability only) =="
+adb shell ping -c 1 -W 3 8.8.8.8 && echo "resolver-IP ping succeeded" || echo "resolver-IP ping failed (see ping output)"
+echo "== ping preflight: target host (DNS + ICMP reachability only) =="
+adb shell ping -c 1 -W 3 "$host" && echo "target-host ping succeeded: $host" || echo "target-host ping failed (DNS, route, or ICMP may be blocked; see ping output)"
+
 # Bound the instrumented run: a blocked test must fail in minutes with
 # diagnostic evidence, not hang until the job timeout (a previous run sat
 # 28 minutes on "Starting 2 tests" with no instrumentation output).
