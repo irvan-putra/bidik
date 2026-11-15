@@ -9,6 +9,10 @@ android {
         applicationId 'com.vanipy.mata'
         minSdk 26
         targetSdk 34
+        // AndroidJUnitRunner is required for Gradle to discover the JUnit4
+        // instrumentation tests in src/androidTest. Without it, Gradle can
+        // exit successfully after starting zero tests.
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         versionCode 1
         versionName '0.1.0'
         // Chaquopy requires an explicit ABI list, so the filter is always

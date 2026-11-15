@@ -8,8 +8,48 @@ case "$QUEUE_URL" in
   *) echo "queue_url must be a public https URL, got: $QUEUE_URL"; exit 1 ;;
 esac
 
+# Remove only CI-generated result/output folders so a previous run cannot
+# make a zero-test run appear healthy.
+rm -rf app/build/outputs/androidTest-results/connected
+rm -rf captures
 ./gradlew -PciEmulator connectedDebugAndroidTest --no-daemon \
   -Pandroid.testInstrumentationRunnerArguments.queue_url="$QUEUE_URL"
+
+# Gradle may report BUILD SUCCESSFUL even if no instrumentation tests were
+# discovered. Require a fresh XML report with at least one executed test.
+python3 - <<'PYTESTS'
+import glob
+import sys
+import xml.etree.ElementTree as ET
+
+reports = glob.glob("app/build/outputs/androidTest-results/connected/**/*.xml", recursive=True)
+if not reports:
+    sys.exit("ERROR: no connected instrumentation test XML reports were produced")
+tests = failures = errors = 0
+for path in reports:
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as exc:
+        sys.exit(f"ERROR: invalid instrumentation test report {path}: {exc}")
+    suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+    tests += sum(int(s.get("tests", "0")) for s in suites)
+    failures += sum(int(s.get("failures", "0")) for s in suites)
+    errors += sum(int(s.get("errors", "0")) for s in suites)
+print(f"Instrumentation results: {tests} tests, {failures} failures, {errors} errors; reports={len(reports)}")
+if tests < 1:
+    sys.exit("ERROR: zero connected instrumentation tests executed")
+if failures or errors:
+    sys.exit("ERROR: connected instrumentation test failures/errors in XML reports")
+PYTESTS
+
 mkdir -p captures
 adb pull /sdcard/Android/data/com.vanipy.mata/files/captures captures
+if ! find captures -type f -name '*.png' -print -quit | grep -q .; then
+  echo "ERROR: emulator capture directory was empty or contained no PNG screenshots" >&2
+  exit 1
+fi
+if [ ! -s captures/ci-page-viewport.png ]; then
+  echo "ERROR: expected CI viewport capture captures/ci-page-viewport.png was missing or empty" >&2
+  exit 1
+fi
 ls -laR captures
