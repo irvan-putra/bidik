@@ -81,3 +81,7 @@ keystore is created once and stored in GitHub Actions secrets (write-only)
 through the repo's release custodian; the secret names are documented in
 release.yml. An in-app updater that pulls new releases automatically is a
 planned follow-up.
+
+## Research notes
+
+- [Capturing how a web page looks on a phone, from an app](docs/research/webview-vs-mediaprojection.md) - compares app WebView rendering with Android screen capture; no device-specific measurements.
