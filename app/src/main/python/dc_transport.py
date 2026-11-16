@@ -25,6 +25,7 @@ pure logic (queue selection, ledger) stays unit-testable without the core.
 import json
 import logging
 import os
+import shutil
 
 log = logging.getLogger("bidik.dc_transport")
 
@@ -202,6 +203,23 @@ def provision(native_lib_dir, files_dir, relay):
         return addr
     finally:
         rpc.close()
+
+
+def runtime_smoke(native_lib_dir, files_dir):
+    """No-account runtime check: proves the vendored rpc core starts and
+    answers a request on this device (ABI/translation sanity). Uses a
+    THROWAWAY accounts dir that is removed afterwards, so the real
+    profile is never touched, and returns only a bounded count - no
+    addresses, keys or paths. No network, no account, no keys.
+    """
+    tmp = os.path.join(files_dir, "smoke-tmp")
+    rpc, dc = _rpc(native_lib_dir, tmp)
+    try:
+        n = len(dc.get_all_accounts())
+        return json.dumps({"status": "ok", "accounts_seen": n})
+    finally:
+        rpc.close()
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def self_address(native_lib_dir, files_dir):
