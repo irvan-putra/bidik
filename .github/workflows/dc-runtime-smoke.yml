@@ -56,23 +56,7 @@ jobs:
           cores: 4
           ram-size: 4096
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: |
-            set -euo pipefail
-            echo "== ABI evidence (is arm64 advertised on this x86_64 image?) =="
-            adb shell getprop ro.product.cpu.abi
-            adb shell getprop ro.product.cpu.abilist
-            adb shell getprop ro.dalvik.vm.native.bridge
-            echo "== install (arm64-only APKs) =="
-            adb install -r app/build/outputs/apk/debug/app-debug.apk
-            adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            echo "== runtime smoke =="
-            set +e
-            timeout -k 30 600 adb shell "am instrument -w -e class com.vanipy.bidik.DcRuntimeSmokeTest com.vanipy.bidik.test/androidx.test.runner.AndroidJUnitRunner" > /tmp/smoke.log 2>&1
-            irc=$?
-            set -e
-            sed -E 's#https?://[^ ]*#[url]#g' /tmp/smoke.log
-            if [ $irc -ne 0 ] || ! grep -q '^OK (' /tmp/smoke.log; then
-              echo "runtime smoke failed; last logcat:" >&2
-              adb logcat -d -t 300 >&2 || true
-              exit 1
-            fi
+          # The action runs each script line as its own sh -c: one line
+          # calling one file (run 43789402627's inline if/fi broke that
+          # way AFTER the smoke itself had passed).
+          script: bash tools/dc-runtime-smoke.sh
