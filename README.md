@@ -5,26 +5,40 @@ app, it picks up a queue of pages to look at, captures the screens, and
 sends the captures back to a trusted contact you choose.
 
 **Status: prototype.** The target flow is automatic: open the app, the
-queue syncs in, pages render and capture, results send back. The current
-stage is earlier than that: the capture pipeline (render, settle,
-screenshot) is implemented and unit-tested with an emulator pixel check
-wired up. The messaging transport code exists (app side) but is NOT
-runtime-verified or enabled yet.
-Today the app reads its queue from a local file, runs captures from a
-manual button, and writes results locally. Nothing is sent anywhere
-automatically, and the automatic flow stays the goal, not a dropped
-feature.
+queue syncs in, pages render and capture, results send back. What exists
+today:
+
+- Capture (render, settle, screenshot) with the phone's WebView: implemented
+  and checked on an emulator.
+- A local-file queue and local results, for development and for use without
+  any messaging account.
+- An optional, explicit setup path for the full flow. The setup screen has a
+  "Create messaging account" button. Only when you tap it, the app creates a
+  new DeltaChat account on the relay nine.testrun.org (a network call). Its
+  keys live only on the phone and there is no backup or export yet, so
+  clearing the app's data loses the account. Next you pair with the
+  assistant's invite QR (scan or paste). Once paired, opening the app
+  attempts to sync the queue, capture each page and send the results back
+  to that one paired contact. That path is implemented, not verified: it is
+  an attempt on each open, not a delivery guarantee.
+- Not verified yet: account creation against the live relay, pairing, and
+  send-back have not been run end to end on a real phone. A fresh,
+  unconfigured install creates no account and contacts no relay until you
+  tap the setup buttons. After you have set up and paired, later launches
+  may try to sync and send again without asking each time.
 
 Feature status:
 
 | Feature | Status |
 | --- | --- |
-| WebView capture (viewport + full-page) | implemented, emulator pixel check pending |
+| WebView capture (viewport + full-page) | implemented; fixture-page pixels verified by an emulator CI run; real-page and physical-phone fidelity not verified |
 | Queue list UI | implemented |
-| Local file queue/result transport | implemented (development path) |
-| DeltaChat transport (queue in, captures out) | app-side code present, no runtime verification; gated off pending pairing approval |
+| Local file queue/result transport | implemented (works with no account) |
+| Messaging account creation (explicit button, nine.testrun.org) | implemented; live provisioning not verified |
+| Pairing by invite QR (secure join) | implemented; not verified on a real phone |
+| Queue in / captures out over DeltaChat after pairing, attempted on each open | implemented; sync and send-back not verified end to end; activity-owned lifecycle not verified |
+| Account backup/export | not built |
 | Real-Chrome capture mode | not planned for v1 |
-| Automatic queue sync + send-back | goal; blocked on transport |
 | In-app auto-update from releases | planned follow-up |
 | Signed test-APK workflow (manual, exact-commit tests first) | implemented, first release pending |
 
@@ -32,12 +46,10 @@ Feature status:
 
 No APK has been published yet. When a release exists it will be a direct
 GitHub release asset (`bidik-vX.Y.Z.apk`, no ZIP); see the repository's
-Releases page. The first build will be the capture prototype: it reads its
-queue from a local file, captures when you press the button and writes
-results locally. It does not sync or send anything; the automatic sync and
-send-back flow remains the goal. Builds come from the manual `sign test apk`
-workflow, which tests the exact commit without any secrets before a separate
-minimal job signs the unsigned APK.
+Releases page. Builds come from the manual `sign test apk` workflow, which
+tests the exact commit without any secrets before a separate minimal job
+signs the unsigned APK. An in-app updater that pulls new releases is a
+planned follow-up.
 
 ## Capture fidelity
 
@@ -48,19 +60,30 @@ settings that approximate Chrome's defaults, but rendering is not
 guaranteed identical to Chrome: no Chrome cookies or logins, no Sync or
 Data Saver, and some web platform APIs behave differently. Every capture
 records the WebView package version in its result metadata so the actual
-renderer is always known. Fidelity claims wait on the emulator pixel
-check and a run on a physical phone.
+renderer is always known. The emulator capture check has verified the
+pixels of a public fixture page in CI. Fidelity on real pages and on a
+physical phone is not verified yet, so no such claim is made.
 
 ## Pairing and privacy
 
 - The app is built to talk to exactly one trusted contact over DeltaChat.
-  The contact address is entered in the app at setup time: runtime config,
+  The contact is set by the pairing QR at setup time: runtime config,
   never in source, and public builds ship unconfigured.
-- Account setup is an explicit action from the setup screen, never
-  automatic on first launch. The DeltaChat profile lives only in the
-  app-private files dir (`android:allowBackup="false"`).
-- Sending is manual: a run starts from the app's button. There is no
-  background sending in v1.
+- Creating the messaging account and pairing are explicit actions from the
+  setup screen, never automatic on first launch. The account is created on
+  nine.testrun.org only when you tap the button. The DeltaChat profile
+  lives only in the app-private files dir (`android:allowBackup="false"`).
+- Unpaired, a capture run starts only from the app's button and results stay
+  on the phone. Once paired, opening the app attempts to sync, capture and
+  send results back to the paired contact without a per-run tap. The first
+  setup (account creation, pairing) is the explicit consent step; later
+  launches do not ask again.
+- There is no dedicated background service (the service class is a stub that
+  stops immediately). The runs are owned by the activity: its coroutine scope
+  is cancelled when the activity is destroyed, not when it is stopped, so a
+  run may keep going while the app is paused in the background. How that
+  behaves on a real phone is not verified; do not rely on foreground-only
+  behavior.
 - No page queues, captures, contact addresses or personal data belong in
   this repo. Tests use public fixture URLs only.
 - See SECURITY.md for the URL guardrails and resource caps.
@@ -83,15 +106,6 @@ followed by a run summary. See `QueueProtocol.kt` for the exact shape.
   Android emulator against a public fixture page and uploads the captured
   PNGs. No real-page fidelity claim is made before those pixels, and
   ultimately a run on a physical phone, are inspected.
-
-## Releases
-
-Manual GitHub Actions release (draft): version stamp, icon badge, tag,
-signed APK named `bidik-vX.Y.Z.apk` as a direct release asset. The signing
-keystore is created once and stored in GitHub Actions secrets (write-only)
-through the repo's release custodian; the secret names are documented in
-release.yml. An in-app updater that pulls new releases automatically is a
-planned follow-up.
 
 ## Research notes
 
