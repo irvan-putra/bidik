@@ -26,7 +26,18 @@ Feature status:
 | Real-Chrome capture mode | not planned for v1 |
 | Automatic queue sync + send-back | goal; blocked on transport |
 | In-app auto-update from releases | planned follow-up |
-| Release signing workflow | draft |
+| Signed test-APK workflow (manual, exact-commit tests first) | implemented, first release pending |
+
+## Releases
+
+No APK has been published yet. When a release exists it will be a direct
+GitHub release asset (`bidik-vX.Y.Z.apk`, no ZIP); see the repository's
+Releases page. The first build will be the capture prototype: it reads its
+queue from a local file, captures when you press the button and writes
+results locally. It does not sync or send anything; the automatic sync and
+send-back flow remains the goal. Builds come from the manual `sign test apk`
+workflow, which tests the exact commit without any secrets before a separate
+minimal job signs the unsigned APK.
 
 ## Capture fidelity
 

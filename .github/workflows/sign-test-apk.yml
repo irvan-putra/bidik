@@ -1,0 +1,145 @@
+name: sign test apk
+# Manual only. Three jobs: (1) gate: verifier/checker self-tests, no secrets; (2) build: runs the
+# repo's tests and Gradle on the exact main commit with NO secrets and uploads the unsigned APK;
+# (3) sign: minimal job that holds the key, downloads that exact unsigned APK, checks its SHA-256,
+# signs and verifies it. No Gradle, pip or tests run in the signing job.
+# It never creates a release, tag or commit. A reviewed person attaches the APK to a release by hand.
+# NOT ACTIVE until the bidik signing key exists, its four secrets (BIDIK_SIGNING_KEYSTORE_BASE64,
+# BIDIK_SIGNING_STORE_PASSWORD, BIDIK_SIGNING_KEY_PASSWORD, BIDIK_SIGNING_KEY_ALIAS) are set, and the
+# release commit replaces the placeholder EXPECTED_CERT_SHA256 below with the key certificate digest.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_sign:
+        description: Type SIGN to build and sign a test APK with the bidik key
+        required: true
+        type: string
+permissions:
+  contents: read
+env:
+  # SET in the release commit: 64 uppercase hex digits of the key certificate. Not a secret.
+  EXPECTED_CERT_SHA256: REPLACE_AFTER_KEY_CREATION
+  # SET per release in the release commit: must equal the gradle defaults, tools/icon-version.txt and the icon badge.
+  EXPECTED_VERSION_NAME: '0.1.0'
+  EXPECTED_VERSION_CODE: '1'
+  EXPECTED_PACKAGE: com.vanipy.bidik
+  EXPECTED_LABEL: bidik
+  BUILD_TOOLS_VERSION: 34.0.0
+jobs:
+  gate:
+    if: ${{ inputs.confirm_sign == 'SIGN' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verifier self-test (synthetic bad inputs must fail)
+        run: bash tools/test-verify-signed-apk.sh
+  build:
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      unsigned_sha256: ${{ steps.unsigned.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Version sidecar must equal the release version
+        run: |
+          set -euo pipefail
+          [ "$(< tools/icon-version.txt)" = "$EXPECTED_VERSION_NAME" ] || { echo "tools/icon-version.txt differs from EXPECTED_VERSION_NAME"; exit 1; }
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with: { distribution: temurin, java-version: '17' }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: { python-version: '3.10' }
+      - name: Gradle 8.5 (checksum verified)
+        run: |
+          curl -sL -o /tmp/g.zip https://services.gradle.org/distributions/gradle-8.5-bin.zip
+          echo "9d926787066a081739e8200858338b4a69e837c3a821a33aca9db09dd4a41026  /tmp/g.zip" | sha256sum -c -
+          unzip -q /tmp/g.zip -d /tmp
+      - name: Qualify exact commit (unit tests, transport tests)
+        run: |
+          set -euo pipefail
+          /tmp/gradle-8.5/bin/gradle --no-daemon testDebugUnitTest
+          python -m pip install -q pytest
+          python -m pytest app/src/test/python -q
+          echo "bidik gating tests passed (gradle unit tests, python transport tests)" > test-summary.txt
+      - name: Build unsigned release
+        run: /tmp/gradle-8.5/bin/gradle --no-daemon "-PversionName=$EXPECTED_VERSION_NAME" "-PversionCode=$EXPECTED_VERSION_CODE" assembleRelease
+      - name: Collect the single unsigned APK
+        id: unsigned
+        run: |
+          set -euo pipefail
+          [ "$(ls app/build/outputs/apk/release/*.apk | wc -l)" = 1 ]
+          cp "$(ls app/build/outputs/apk/release/*.apk)" bidik-unsigned.apk
+          echo "sha256=$(sha256sum bidik-unsigned.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bidik-unsigned
+          path: |
+            bidik-unsigned.apk
+            test-summary.txt
+          if-no-files-found: error
+  sign:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: bidik-unsigned
+          path: unsigned
+      - name: Unsigned APK must be byte-identical to what the build job produced
+        env:
+          WANT: ${{ needs.build.outputs.unsigned_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$WANT" =~ ^[0-9a-f]{64}$ ]]
+          [ "$(sha256sum unsigned/bidik-unsigned.apk | cut -d' ' -f1)" = "$WANT" ]
+      - name: Align and sign
+        env:
+          KS_B64: ${{ secrets.BIDIK_SIGNING_KEYSTORE_BASE64 }}
+          KS_STORE_PW: ${{ secrets.BIDIK_SIGNING_STORE_PASSWORD }}
+          KS_KEY_PW: ${{ secrets.BIDIK_SIGNING_KEY_PASSWORD }}
+          KS_ALIAS: ${{ secrets.BIDIK_SIGNING_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_CERT_SHA256" =~ ^[0-9A-F]{64}$ ]] || { echo "EXPECTED_CERT_SHA256 not filled in; refusing to sign"; exit 1; }
+          bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
+          [ -x "$bt/apksigner" ] && [ -x "$bt/zipalign" ]
+          work=$(mktemp -d "$RUNNER_TEMP/sign.XXXXXX"); chmod 700 "$work"
+          trap 'rm -rf "$work"' EXIT
+          printf '%s' "$KS_B64" | base64 -d > "$work/app.jks"; chmod 600 "$work/app.jks"
+          "$bt/zipalign" -f -p 4 unsigned/bidik-unsigned.apk "$work/aligned.apk"
+          printf '%s\n%s\n' "$KS_STORE_PW" "$KS_KEY_PW" > "$work/pw"
+          "$bt/apksigner" sign --ks "$work/app.jks" --ks-key-alias "$KS_ALIAS" \
+            --ks-pass "file:$work/pw" --key-pass "file:$work/pw" \
+            --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
+            --out "bidik-v${EXPECTED_VERSION_NAME}.apk" "$work/aligned.apk"
+          rm -f "$work/pw" "bidik-v${EXPECTED_VERSION_NAME}.apk.idsig"
+      - name: Verify the signed APK (no secrets in this step)
+        run: |
+          set -euo pipefail
+          bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
+          [ -x "$bt/aapt2" ]
+          out="bidik-v${EXPECTED_VERSION_NAME}.apk"
+          "$bt/apksigner" verify --verbose --print-certs "$out" > verify.txt
+          "$bt/aapt2" dump badging "$out" > badging.txt
+          bash tools/verify-signed-apk.sh verify.txt badging.txt
+          sha256sum "$out" | tee "$out.sha256"
+          cp unsigned/test-summary.txt test-summary.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bidik-signed-test
+          path: |
+            bidik-v*.apk
+            bidik-v*.apk.sha256
+            verify.txt
+            badging.txt
+            test-summary.txt
+          if-no-files-found: error
