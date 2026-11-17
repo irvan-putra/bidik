@@ -44,12 +44,9 @@ Feature status:
 
 ## Releases
 
-No APK has been published yet. When a release exists it will be a direct
-GitHub release asset (`bidik-vX.Y.Z.apk`, no ZIP); see the repository's
-Releases page. Builds come from the manual `sign test apk` workflow, which
-tests the exact commit without any secrets before a separate minimal job
-signs the unsigned APK. An in-app updater that pulls new releases is a
-planned follow-up.
+The signed test APK v0.1.0 is published as a direct [GitHub release asset](https://github.com/irvan-putra/bidik/releases/download/v0.1.0/bidik-v0.1.0.apk) (`bidik-v0.1.0.apk`, no ZIP); see the [release page](https://github.com/irvan-putra/bidik/releases/tag/v0.1.0). This remains a prototype and the unverified live path described above is not a verified phone-to-relay service.
+
+Builds come from the manual `sign test apk` workflow, which tests the exact commit without any secrets before a separate minimal job signs the unsigned APK. An in-app updater that pulls new releases is a planned follow-up.
 
 ## Capture fidelity
 
