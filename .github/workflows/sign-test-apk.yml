@@ -18,7 +18,7 @@ permissions:
   contents: read
 env:
   # SET in the release commit: 64 uppercase hex digits of the key certificate. Not a secret.
-  EXPECTED_CERT_SHA256: REPLACE_AFTER_KEY_CREATION
+  EXPECTED_CERT_SHA256: A6DE82B10E4AF1DF5E523DB9DE00136994F3168075E3FBDA6FFF7E551F04A722
   # SET per release in the release commit: must equal the gradle defaults, tools/icon-version.txt and the icon badge.
   EXPECTED_VERSION_NAME: '0.1.0'
   EXPECTED_VERSION_CODE: '1'
