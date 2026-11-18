@@ -11,6 +11,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import java.util.regex.Pattern
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -89,7 +90,7 @@ class ScreenRecordTest {
         assertTrue("consent dialog never appeared or had no accept button: " + windowDump(), accepted)
 
         // The record button becomes the stop control once the session runs.
-        val stop = device.wait(Until.findObject(By.text("Stop recording")), 30_000)
+        val stop = device.wait(Until.findObject(By.text(Pattern.compile("stop recording", Pattern.CASE_INSENSITIVE))), 30_000)
         assertNotNull("stop control never appeared; recording did not start: " + windowDump(), stop)
 
         Thread.sleep(6_000) // record a few seconds of the real screen
@@ -137,12 +138,14 @@ class ScreenRecordTest {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         assertNotNull(
             "app did not come to the front: " + windowDump(),
-            device.wait(Until.findObject(By.text("Run capture")), 30_000)
+            device.wait(Until.findObject(By.text(Pattern.compile("run capture", Pattern.CASE_INSENSITIVE))), 30_000)
         )
     }
 
     private fun clickAppButton(label: String) {
-        val obj = device.wait(Until.findObject(By.text(label)), 15_000)
+        val obj = device.wait(Until.findObject(
+            By.text(Pattern.compile(Pattern.quote(label), Pattern.CASE_INSENSITIVE)), 15_000
+        )
         assertNotNull("button '$label' not found: " + windowDump(), obj)
         obj!!.click()
     }
@@ -151,7 +154,9 @@ class ScreenRecordTest {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             for (label in labels) {
-                val obj = device.findObject(By.text(label))
+                val obj = device.findObject(
+                    By.text(Pattern.compile(Pattern.quote(label), Pattern.CASE_INSENSITIVE))
+                )
                 if (obj != null) {
                     obj.click()
                     return true
