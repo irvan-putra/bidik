@@ -45,7 +45,9 @@ Feature status:
 
 ## Releases
 
-The signed test APK v0.1.0 is published as a direct [GitHub release asset](https://github.com/irvan-putra/bidik/releases/download/v0.1.0/bidik-v0.1.0.apk) (`bidik-v0.1.0.apk`, no ZIP); see the [release page](https://github.com/irvan-putra/bidik/releases/tag/v0.1.0). This remains a prototype and the unverified live path described above is not a verified phone-to-relay service.
+The signed test APK v0.1.2 is published as a direct [GitHub release asset](https://github.com/irvan-putra/bidik/releases/download/v0.1.2/bidik-v0.1.2.apk) (`bidik-v0.1.2.apk`, no ZIP); see the [release page](https://github.com/irvan-putra/bidik/releases/tag/v0.1.2). It adds opt-in screen recording (per-session system consent, silent local MP4, manual share) and adaptive/themed launcher icons. The recording flow has not yet run on an emulator or physical phone. This remains a prototype and the unverified live path described above is not a verified phone-to-relay service.
+
+Earlier: [v0.1.1](https://github.com/irvan-putra/bidik/releases/tag/v0.1.1), [v0.1.0](https://github.com/irvan-putra/bidik/releases/tag/v0.1.0).
 
 Builds come from the manual `sign test apk` workflow, which tests the exact commit without any secrets before a separate minimal job signs the unsigned APK. An in-app updater that pulls new releases is a planned follow-up.
 
