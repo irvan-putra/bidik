@@ -40,6 +40,11 @@ class ScreenRecordTest {
     @Before
     fun setUp() {
         device = UiDevice.getInstance(instrumentation)
+        // A freshly booted emulator sits on the lock screen; the app's
+        // windows are not reachable through UiAutomator until it is gone.
+        device.wakeUp()
+        device.executeShellCommand("wm dismiss-keyguard")
+        device.waitForIdle(5_000)
         RecordingStore.dir(context).listFiles()?.forEach { it.delete() }
         RecordingStore.clearActive(context)
     }
@@ -113,7 +118,7 @@ class ScreenRecordTest {
         }
         context.startActivity(intent)
         assertNotNull(
-            "app did not come to the front",
+            "app did not come to the front: " + windowDump(),
             device.wait(Until.findObject(By.text("Run capture")), 30_000)
         )
     }
