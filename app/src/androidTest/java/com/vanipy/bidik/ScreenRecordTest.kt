@@ -93,7 +93,16 @@ class ScreenRecordTest {
         val stop = device.wait(Until.findObject(By.text(Pattern.compile("stop recording", Pattern.CASE_INSENSITIVE))), 30_000)
         assertNotNull("stop control never appeared; recording did not start: " + windowDump(), stop)
 
-        Thread.sleep(6_000) // record a few seconds of the real screen
+        // Record ~6s of the real screen. A static screen composites no
+        // new frames (run 44371384389 produced a 1.7s video from a 6s
+        // window), so keep the UI moving with deterministic updates.
+        val recordDeadline = System.currentTimeMillis() + 6_000
+        var tick = 0
+        while (System.currentTimeMillis() < recordDeadline) {
+            tick++
+            scenario!!.onActivity { it.status.text = "recording tick $tick" }
+            Thread.sleep(200)
+        }
         stop.click()
 
         val recording = waitForRecording(30_000)

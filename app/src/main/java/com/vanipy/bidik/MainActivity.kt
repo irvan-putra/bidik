@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var listView: LinearLayout
-    private lateinit var status: TextView
+    internal lateinit var status: TextView
     private lateinit var progress: ProgressBar
     internal lateinit var setupBox: LinearLayout
 
