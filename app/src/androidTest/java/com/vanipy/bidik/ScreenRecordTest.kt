@@ -18,6 +18,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.BeforeClass
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -50,6 +51,21 @@ class ScreenRecordTest {
     private lateinit var device: UiDevice
     private var scenario: ActivityScenario<MainActivity>? = null
 
+    companion object {
+        /**
+         * Evidence is cleared once per run, not per test: clearing in
+         * setUp let a later test wipe the files an earlier test had
+         * already copied (run 44375141949 pulled zero evidence files).
+         */
+        @JvmStatic
+        @BeforeClass
+        fun clearEvidenceOnce() {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            context.getExternalFilesDir("recordings-evidence")?.listFiles()
+                ?.forEach { it.delete() }
+        }
+    }
+
     @Before
     fun setUp() {
         device = UiDevice.getInstance(instrumentation)
@@ -60,7 +76,6 @@ class ScreenRecordTest {
         device.waitForIdle(5_000)
         RecordingStore.dir(context).listFiles()?.forEach { it.delete() }
         RecordingStore.clearActive(context)
-        evidenceDir().listFiles()?.forEach { it.delete() }
     }
 
     @After
