@@ -45,7 +45,7 @@ Feature status:
 
 ## Releases
 
-The signed test APK v0.1.2 is published as a direct [GitHub release asset](https://github.com/irvan-putra/bidik/releases/download/v0.1.2/bidik-v0.1.2.apk) (`bidik-v0.1.2.apk`, no ZIP); see the [release page](https://github.com/irvan-putra/bidik/releases/tag/v0.1.2). It adds opt-in screen recording (per-session system consent, silent local MP4, manual share) and adaptive/themed launcher icons. The recording flow has not yet run on an emulator or physical phone. This remains a prototype and the unverified live path described above is not a verified phone-to-relay service.
+The signed test APK v0.1.2 is published as a direct [GitHub release asset](https://github.com/irvan-putra/bidik/releases/download/v0.1.2/bidik-v0.1.2.apk) (`bidik-v0.1.2.apk`, no ZIP); see the [release page](https://github.com/irvan-putra/bidik/releases/tag/v0.1.2). It adds opt-in screen recording (per-session system consent, silent local MP4, manual share) and adaptive/themed launcher icons. The recording flow is verified on an API 34 emulator - consent accept and deny, stop and save, playable video, and elapsed time kept through stillness (see [docs/verification/screen-recording-runtime.md](docs/verification/screen-recording-runtime.md)) - but not yet on a physical phone. Known 0.1.2 defect: its recorder shortens the video when the screen is still (a 6s still recording comes out ~1.7s); the corrected pipeline is on main and ships in the 0.1.3 test release. This remains a prototype and the unverified live path described above is not a verified phone-to-relay service.
 
 Earlier: [v0.1.1](https://github.com/irvan-putra/bidik/releases/tag/v0.1.1), [v0.1.0](https://github.com/irvan-putra/bidik/releases/tag/v0.1.0).
 
