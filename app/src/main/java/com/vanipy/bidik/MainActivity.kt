@@ -1,6 +1,11 @@
 package com.vanipy.bidik
 
 import android.app.AlertDialog
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -10,7 +15,9 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.vanipy.bidik.bot.DcQueueTransport
@@ -59,6 +66,39 @@ class MainActivity : AppCompatActivity() {
             if (contents != null) completePairing(contents)
         }
 
+    // Per-session system consent for screen recording. The result token
+    // backs exactly one recording session and is handed to the service.
+    private val recordConsent =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK && result.data != null) {
+                val intent = Intent(this, ScreenRecordService::class.java).apply {
+                    action = ScreenRecordService.ACTION_START
+                    putExtra(ScreenRecordService.EXTRA_RESULT_CODE, result.resultCode)
+                    putExtra(ScreenRecordService.EXTRA_RESULT_DATA, result.data)
+                }
+                ContextCompat.startForegroundService(this, intent)
+                status.text = "recording the screen... stop from the notification or here"
+                DiagLog.log(this, "record", "consent_granted")
+            } else {
+                status.text = "screen recording not started: consent not granted"
+                DiagLog.log(this, "record", "consent_denied")
+            }
+            renderRecordSection()
+        }
+
+    private lateinit var recordBtn: Button
+    private lateinit var recordingsBox: LinearLayout
+
+    private val recordStatusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.getStringExtra(ScreenRecordService.EXTRA_STATE)) {
+                ScreenRecordService.STATE_SAVED -> status.text = "recording saved on this phone"
+                ScreenRecordService.STATE_FAILED -> status.text = "screen recording failed or was empty"
+            }
+            renderRecordSection()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -71,6 +111,12 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { runCapture() }
         }
         root.addView(runBtn)
+        recordBtn = Button(this).apply {
+            setOnClickListener { onRecordClicked() }
+        }
+        root.addView(recordBtn)
+        recordingsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(recordingsBox)
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             visibility = View.GONE
         }
@@ -94,6 +140,15 @@ class MainActivity : AppCompatActivity() {
         root.addView(setupScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         DiagLog.log(this, "app", "open")
+
+        val filter = IntentFilter(ScreenRecordService.ACTION_STATUS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(recordStatusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(recordStatusReceiver, filter)
+        }
+        renderRecordSection()
 
         renderSetup()
         if (SetupController.isPaired(this)) {
@@ -227,6 +282,67 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun onRecordClicked() {
+        if (RecordingStore.activeName(this) != null) {
+            startService(
+                Intent(this, ScreenRecordService::class.java)
+                    .setAction(ScreenRecordService.ACTION_STOP)
+            )
+            return
+        }
+        val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE)
+            as android.media.projection.MediaProjectionManager
+        recordConsent.launch(mgr.createScreenCaptureIntent())
+    }
+
+    /**
+     * The record button doubles as the stop control while a session runs,
+     * and saved recordings get an explicit share action. Recording files
+     * are local; nothing is uploaded automatically.
+     */
+    internal fun renderRecordSection() {
+        val activeName = RecordingStore.activeName(this)
+        recordBtn.text = if (activeName != null) "Stop recording" else "Record screen"
+        recordingsBox.removeAllViews()
+        val recordings = RecordingStore.list(this)
+        if (recordings.isNotEmpty()) {
+            recordingsBox.addView(TextView(this).apply {
+                text = "recordings on this phone (local only; share is manual):"
+                setPadding(24, 16, 24, 4)
+            })
+            for (file in recordings) {
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                row.addView(TextView(this).apply {
+                    text = "${file.name}  ${file.length() / (1024 * 1024)} MB"
+                    setPadding(24, 20, 24, 20)
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                row.addView(Button(this).apply {
+                    text = "Share"
+                    setOnClickListener { shareRecording(file) }
+                })
+                recordingsBox.addView(row)
+            }
+        }
+    }
+
+    internal fun shareRecording(file: File) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this, "com.vanipy.bidik.fileprovider", file
+        )
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "video/mp4"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(android.content.Intent.createChooser(intent, "Share recording"))
+        DiagLog.log(this, "record", "shared")
+    }
+
+    override fun onResume() {
+        super.onResume()
+        renderRecordSection()
+    }
+
     private fun refreshList(after: (() -> Unit)? = null) {
         scope.launch {
             val queue = try { currentTransport().fetchQueue() } catch (e: Exception) {
@@ -328,6 +444,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            unregisterReceiver(recordStatusReceiver)
+        } catch (_: IllegalArgumentException) {
+        }
         scope.cancel()
     }
 }

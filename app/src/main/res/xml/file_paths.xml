@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Only the exported diagnostics snapshot in the cache is shareable. -->
+<!-- The exported diagnostics snapshot in the cache, and saved screen
+     recordings in the app-private files dir, are shareable by explicit
+     user action only. -->
 <paths>
     <cache-path name="diagnostics" path="diagnostics/" />
+    <files-path name="recordings" path="recordings/" />
 </paths>

@@ -37,6 +37,7 @@ Feature status:
 | Messaging account creation (explicit button, nine.testrun.org) | implemented; live provisioning not verified |
 | Pairing by invite QR (secure join) | implemented; not verified on a real phone |
 | Queue in / captures out over DeltaChat after pairing, attempted on each open | implemented; sync and send-back not verified end to end; activity-owned lifecycle not verified |
+| Screen recording (system consent prompt each session, local silent MP4, manual per-file share) | implemented; not yet verified on an emulator or physical phone |
 | Account backup/export | not built |
 | Real-Chrome capture mode | not planned for v1 |
 | In-app auto-update from releases | planned follow-up |
@@ -75,15 +76,32 @@ physical phone is not verified yet, so no such claim is made.
   send results back to the paired contact without a per-run tap. The first
   setup (account creation, pairing) is the explicit consent step; later
   launches do not ask again.
-- There is no dedicated background service (the service class is a stub that
-  stops immediately). The runs are owned by the activity: its coroutine scope
-  is cancelled when the activity is destroyed, not when it is stopped, so a
-  run may keep going while the app is paused in the background. How that
-  behaves on a real phone is not verified; do not rely on foreground-only
-  behavior.
+- There is no dedicated background service for the capture queue (the
+  service class is a stub that stops immediately). Screen recording is
+  the one real background component: a foreground service with an
+  ongoing notification, started only after the per-session system
+  consent prompt, stopped from the notification, the app, the system or
+  a ten-minute cap. The capture runs are owned by the activity: its
+  coroutine scope is cancelled when the activity is destroyed, not when
+  it is stopped, so a run may keep going while the app is paused in the
+  background. How that behaves on a real phone is not verified; do not
+  rely on foreground-only behavior.
 - No page queues, captures, contact addresses or personal data belong in
   this repo. Tests use public fixture URLs only.
 - See SECURITY.md for the URL guardrails and resource caps.
+
+## Screen recording
+
+A separate, opt-in tool: the Record screen button shows Android's system
+consent prompt every session (no silent capture is possible), then a
+foreground service records the real screen - home screen and widgets
+included - to a silent MP4 in the app-private files dir. There is no
+microphone access, no upload, and no queue integration: recordings stay
+on the phone until you share one explicitly from the app's list or clear
+the app's data. Recording stops from the notification action, the app's
+stop button, or automatically after ten minutes; a recording that
+receives no frames deletes its partial file. See
+[the MediaProjection research note](docs/research/screen-recording-mediaprojection.md).
 
 ## Queue / result protocol (v1, draft)
 
@@ -107,3 +125,4 @@ followed by a run summary. See `QueueProtocol.kt` for the exact shape.
 ## Research notes
 
 - [Capturing how a web page looks on a phone, from an app](docs/research/webview-vs-mediaprojection.md) - compares app WebView rendering with Android screen capture; no device-specific measurements.
+- [Recording the screen from an app: MediaProjection](docs/research/screen-recording-mediaprojection.md) - consent, foreground-service and encoding requirements behind the screen recorder; no device-specific measurements.

@@ -63,6 +63,7 @@ class MainActivityRenderTest {
             return false
         }
         assertTrue("Diagnostics button must be present", findButton(root, "Diagnostics"))
+        assertTrue("Record screen button must be present", findButton(root, "Record screen"))
     }
 
     @Test

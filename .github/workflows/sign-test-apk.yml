@@ -20,8 +20,8 @@ env:
   # SET in the release commit: 64 uppercase hex digits of the key certificate. Not a secret.
   EXPECTED_CERT_SHA256: A6DE82B10E4AF1DF5E523DB9DE00136994F3168075E3FBDA6FFF7E551F04A722
   # SET per release in the release commit: must equal the gradle defaults, tools/icon-version.txt and the icon badge.
-  EXPECTED_VERSION_NAME: '0.1.1'
-  EXPECTED_VERSION_CODE: '2'
+  EXPECTED_VERSION_NAME: '0.1.2'
+  EXPECTED_VERSION_CODE: '3'
   EXPECTED_PACKAGE: com.vanipy.bidik
   EXPECTED_LABEL: bidik
   BUILD_TOOLS_VERSION: 34.0.0
@@ -59,6 +59,11 @@ jobs:
           curl -sL -o /tmp/g.zip https://services.gradle.org/distributions/gradle-8.5-bin.zip
           echo "9d926787066a081739e8200858338b4a69e837c3a821a33aca9db09dd4a41026  /tmp/g.zip" | sha256sum -c -
           unzip -q /tmp/g.zip -d /tmp
+      - name: Launcher resources are the generator's output (deterministic)
+        run: |
+          set -euo pipefail
+          python -m pip install -q pillow==12.3.0
+          python tools/badge_icon.py --check
       - name: Qualify exact commit (unit tests, transport tests)
         run: |
           set -euo pipefail

@@ -18,7 +18,10 @@ private content into captures.
   JavaScript gets no access to app code or files.
 - **Resource caps.** A queue is limited to 20 pages, per-page load has a
   30s timeout, settle wait is clamped to 15s, and full-page captures are
-  capped at 16000px height to bound memory and runtime.
+  capped at 16000px height to bound memory and runtime. Screen recording
+  is capped at ten minutes per session, starts only with at least 200 MB
+  of free space, and encodes at a capped bit rate, so one recording is a
+  bounded local file.
 - **Explicit setup, automatic runs once paired.** Creating the
   messaging account (a new account on relay nine.testrun.org) and
   pairing are explicit button actions, and pairing completes the
@@ -41,12 +44,16 @@ private content into captures.
   test server can load in the real WebView. Release builds never merge
   it: every destination keeps the platform default (cleartext denied),
   and the UrlGuard private-address block is unchanged in all builds.
-- **Local capture archive.** Every run writes its screenshots to its own
-  `captures/run-*` directory in the app-private files dir. Archives are
-  kept, never auto-deleted; they leave the phone only via the paired
-  transport and are gone only when the app's data is cleared. Account
-  keys live only on the phone (backup/export is not built yet), so
-  clearing app data also loses the messaging account.
+- **Local capture and recording archive.** Every run writes its
+  screenshots to its own `captures/run-*` directory in the app-private
+  files dir. Screen recordings are MP4 files in `recordings/` in the
+  same private dir; they can show anything visible on the screen while
+  recording (notifications, other apps), so treat them as private. Both
+  archives are kept, never auto-deleted; captures leave the phone only
+  via the paired transport and recordings only via an explicit per-file
+  share action, and everything is gone when the app's data is cleared.
+  Account keys live only on the phone (backup/export is not built yet),
+  so clearing app data also loses the messaging account.
 - **Private profile.** The messaging profile (when transport is enabled)
   lives in the app-private files dir with `android:allowBackup="false"`.
 - **Repo hygiene.** No queues, captures, contact addresses, credentials or

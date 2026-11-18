@@ -28,3 +28,14 @@ QR code.
 - Gradle dependency: com.journeyapps:zxing-android-embedded:4.3.0
 - License: Apache License 2.0
 - Source: https://github.com/journeyapps/zxing-android-embedded
+
+## DejaVu Sans Bold (tools/fonts/DejaVuSans-Bold.ttf)
+
+The badge font used by tools/badge_icon.py, vendored so every machine -
+including CI runners - rasterizes the version strip from the identical
+font file. The generator refuses any file whose SHA-256 differs.
+
+- Source: DejaVu fonts project, https://dejavu-fonts.github.io/
+- SHA-256: d1c3ff99f1e1ce1827a33efd4dad81f40babda06bff9e43bd7591c86662a287b
+- License: Bitstream Vera license (permissive); full text in
+  tools/fonts/LICENSE-DejaVu.txt
