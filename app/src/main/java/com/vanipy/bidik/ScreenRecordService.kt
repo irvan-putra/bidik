@@ -11,7 +11,6 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
-import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -33,15 +32,23 @@ import java.io.File
  * getMediaProjection last. The consent token backs exactly one virtual
  * display, so each recording is one consented session.
  *
- * Capture surface: a MediaRecorder (H.264 in MP4) fed by a VirtualDisplay
- * in AUTO_MIRROR mode, so whatever is on the screen - home screen,
- * widgets, any app - is recorded. No microphone: no audio source is set,
- * so RECORD_AUDIO is not requested and recordings are silent.
+ * Capture surface: a VirtualDisplay in AUTO_MIRROR mode renders whatever
+ * is on the screen - home screen, widgets, any app - into a
+ * CaptureEngine, which feeds a MediaCodec encoder at a fixed cadence
+ * with wall-clock timestamps (see its KDoc). Fixed-cadence feeding keeps
+ * the video timeline equal to real elapsed time even while the screen is
+ * still, which direct MediaRecorder feeding does not. No microphone: no
+ * audio track is encoded, so RECORD_AUDIO is not requested and
+ * recordings are silent.
  *
- * Files stay on the phone (see RecordingStore). Stop paths: the
- * notification Stop action, the app's stop button, the projection ending
- * from the system side, or the MAX_DURATION_MS cap. A failed or empty
- * recording deletes its partial file.
+ * Files: the encoder writes a partial file in the app-private cache dir;
+ * only after a clean stop is it moved into the recordings dir. The
+ * in-progress file therefore never appears in the app's recordings list
+ * and can never be shared unfinished. Files stay on the phone (see
+ * RecordingStore). Stop paths: the notification Stop action, the app's
+ * stop button, the projection ending from the system side, or the
+ * MAX_DURATION_MS cap. A failed or empty recording deletes its partial
+ * file.
  */
 class ScreenRecordService : Service() {
 
@@ -67,8 +74,9 @@ class ScreenRecordService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var projection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
-    private var recorder: MediaRecorder? = null
+    private var engine: CaptureEngine? = null
     private var outFile: File? = null
+    private var partialFile: File? = null
     private var started = false
     private var cleanedUp = false
 
@@ -138,13 +146,19 @@ class ScreenRecordService : Service() {
         val height = metrics.heightPixels
 
         val file = RecordingStore.newRecordingFile(this)
-        val rec = newRecorder(width, height, file)
-        // Track both before any failing call so cleanup releases the
-        // recorder and deletes the partial file on every failure path.
-        recorder = rec
+        // The encoder writes here; only a cleanly stopped recording is
+        // moved to the recordings dir, so the app's list and share
+        // actions only ever see finished files.
+        val partial = File(cacheDir, file.name + ".part")
+        partial.delete()
+        val eng = CaptureEngine(width, height, partial)
+        // Track all three before any failing call so cleanup releases
+        // the engine and deletes the partial file on every failure path.
+        engine = eng
         outFile = file
+        partialFile = partial
         try {
-            rec.prepare()
+            eng.prepare()
         } catch (e: Exception) {
             cleanup(save = false, failed = true, error = e)
             return
@@ -153,7 +167,7 @@ class ScreenRecordService : Service() {
             mp.createVirtualDisplay(
                 "bidik-screen", width, height, metrics.densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                rec.surface, null, handler
+                eng.displaySurface, null, handler
             )
         } catch (e: Exception) {
             cleanup(save = false, failed = true, error = e)
@@ -161,7 +175,7 @@ class ScreenRecordService : Service() {
         }
         virtualDisplay = vd
         try {
-            rec.start()
+            eng.startFeeding()
         } catch (e: Exception) {
             cleanup(save = false, failed = true, error = e)
             return
@@ -175,50 +189,18 @@ class ScreenRecordService : Service() {
         broadcastStatus(STATE_RECORDING, null)
     }
 
-    private fun newRecorder(width: Int, height: Int, file: File): MediaRecorder {
-        val rec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            MediaRecorder(this)
-        } else {
-            @Suppress("DEPRECATION")
-            MediaRecorder()
-        }
-        rec.setVideoSource(MediaRecorder.VideoSource.SURFACE)
-        rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-        rec.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-        rec.setVideoSize(width, height)
-        rec.setVideoFrameRate(30)
-        rec.setVideoEncodingBitRate(RecordingStore.videoBitRate(width, height))
-        rec.setOutputFile(file.absolutePath)
-        return rec
-    }
-
     @Synchronized
     private fun cleanup(save: Boolean, failed: Boolean, error: Throwable? = null) {
         if (cleanedUp) return
         cleanedUp = true
         handler.removeCallbacksAndMessages(null)
         var usable = save && started
-        val rec = recorder
-        recorder = null
-        if (rec != null) {
-            if (started) {
-                // stop() throws when no frame arrived; the partial file is
-                // then unplayable and must not be kept.
-                try {
-                    rec.stop()
-                } catch (e: Exception) {
-                    usable = false
-                }
-            } else {
-                // Never started: the file was created by setOutputFile but
-                // holds no playable stream.
-                usable = false
-            }
-            try {
-                rec.reset()
-                rec.release()
-            } catch (_: Exception) {
-            }
+        val eng = engine
+        engine = null
+        if (eng != null) {
+            // Blocks briefly on the capture thread (final frame, drain,
+            // muxer stop); false means no playable stream was produced.
+            usable = eng.stop(save = usable) && usable
         }
         try {
             virtualDisplay?.release()
@@ -234,18 +216,37 @@ class ScreenRecordService : Service() {
         active = false
         RecordingStore.clearActive(this)
         val file = outFile
+        val partial = partialFile
         outFile = null
-        if (file != null && usable && !failed && file.exists() && file.length() > 0) {
+        partialFile = null
+        val savedOk = file != null && partial != null && usable && !failed &&
+            partial.exists() && partial.length() > 0 && moveTo(partial, file)
+        if (savedOk && file != null) {
             DiagLog.log(this, "record", "saved")
             broadcastStatus(STATE_SAVED, file.name)
         } else {
-            file?.delete()
+            try {
+                partial?.delete()
+            } catch (_: Exception) {
+            }
             val category = if (error != null) DiagLog.errorCategory(error) else "operation_failed"
             DiagLog.log(this, "record", "failed", detail = "category=$category")
             broadcastStatus(STATE_FAILED, null)
         }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    /** Same-filesystem rename with a copy fallback, verified by size. */
+    private fun moveTo(partial: File, target: File): Boolean {
+        if (partial.renameTo(target)) return target.length() > 0
+        return try {
+            partial.copyTo(target, overwrite = true)
+            partial.delete()
+            target.length() > 0
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun startForegroundWithNotification() {

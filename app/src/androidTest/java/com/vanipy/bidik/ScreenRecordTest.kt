@@ -24,11 +24,19 @@ import java.io.File
 
 /**
  * Runtime check of the screen recorder on a real (emulator) system: the
- * system consent dialog is answered through UiAutomator, a few seconds of
- * the actual screen are recorded, the recording is stopped from the app's
- * own stop control, and the saved MP4 is probed for codec, size, duration
- * and non-uniform frame content. Evidence (MP4 plus a mid frame) is
+ * system consent dialog is answered through UiAutomator, a few seconds
+ * of the actual screen are recorded, the recording is stopped from the
+ * app's own stop control, and the saved MP4 is probed for codec, size,
+ * duration and non-uniform frame content. Evidence (MP4s plus frames) is
  * copied to the app-data dir the CI workflow pulls.
+ *
+ * Two recording shapes are covered:
+ *  - animated: the UI keeps changing while recording (the app's status
+ *    line is ticked), the shape of the widget-animation use case;
+ *  - static: the screen is untouched for the whole window. Run
+ *    44371384389 showed a direct MediaRecorder feed compresses still
+ *    time (1.7s from a 6s window); the encoder must preserve elapsed
+ *    time through stillness, including the still tail at stop.
  *
  * The system dialog labels differ across API levels, so the accept and
  * dismiss steps try the known variants and fail with a window dump when
@@ -52,6 +60,7 @@ class ScreenRecordTest {
         device.waitForIdle(5_000)
         RecordingStore.dir(context).listFiles()?.forEach { it.delete() }
         RecordingStore.clearActive(context)
+        evidenceDir().listFiles()?.forEach { it.delete() }
     }
 
     @After
@@ -81,21 +90,13 @@ class ScreenRecordTest {
     }
 
     @Test
-    fun consentedRecordingSavesPlayableVideo() {
-        launchMain()
-        clickAppButton("Record screen")
-        // Prefer whole-screen capture when the picker offers it, then accept.
-        clickFirstSystemOption(10_000, "Entire screen")
-        val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
-        assertTrue("consent dialog never appeared or had no accept button: " + windowDump(), accepted)
+    fun animatedRecordingPreservesElapsedTime() {
+        startConsentedRecording()
+        val stop = waitForStopControl()
 
-        // The record button becomes the stop control once the session runs.
-        val stop = device.wait(Until.findObject(By.text(Pattern.compile("stop recording", Pattern.CASE_INSENSITIVE))), 30_000)
-        assertNotNull("stop control never appeared; recording did not start: " + windowDump(), stop)
-
-        // Record ~6s of the real screen. A static screen composites no
-        // new frames (run 44371384389 produced a 1.7s video from a 6s
-        // window), so keep the UI moving with deterministic updates.
+        // Record ~6s while the UI keeps changing (the widget-animation
+        // use case): deterministic status ticks guarantee compositor
+        // frames through the whole window.
         val recordDeadline = System.currentTimeMillis() + 6_000
         var tick = 0
         while (System.currentTimeMillis() < recordDeadline) {
@@ -107,8 +108,62 @@ class ScreenRecordTest {
 
         val recording = waitForRecording(30_000)
         assertNotNull("no saved recording after stop: " + windowDump(), recording)
-        recording!!
-        assertTrue("recording suspiciously small: ${recording.length()}", recording.length() > 10_000)
+        assertPlayableVideo(recording!!, frameUs = 1_500_000, what = "animated")
+        // Elapsed time must survive: 6s of motion, generous upper bound.
+        assertElapsed(recording, minimumMs = 5_400, maximumMs = 20_000, what = "animated")
+
+        copyEvidence(recording, "mid-frame.png", frameUs = 1_500_000)
+    }
+
+    @Test
+    fun staticRecordingPreservesElapsedTime() {
+        startConsentedRecording()
+        val stop = waitForStopControl()
+
+        // No UI changes at all: the compositor is idle for the whole
+        // window and through the stop. The recorder must still produce a
+        // video whose duration is the real elapsed time (regression case
+        // for the 1.7s-from-6s direct-feed failure).
+        Thread.sleep(6_000)
+        stop.click()
+
+        val recording = waitForRecording(30_000)
+        assertNotNull("no saved recording after stop: " + windowDump(), recording)
+        assertPlayableVideo(recording!!, frameUs = 1_000_000, what = "static")
+        assertElapsed(recording, minimumMs = 5_400, maximumMs = 20_000, what = "static")
+        // The still tail must be in the file: a frame late in the video
+        // decodes and shows the screen.
+        assertPlayableVideo(recording, frameUs = 5_000_000, what = "static tail")
+
+        copyEvidence(recording, "static-tail-frame.png", frameUs = 5_000_000)
+    }
+
+    private fun startConsentedRecording() {
+        launchMain()
+        clickAppButton("Record screen")
+        // Prefer whole-screen capture when the picker offers it, then accept.
+        clickFirstSystemOption(10_000, "Entire screen")
+        val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
+        assertTrue("consent dialog never appeared or had no accept button: " + windowDump(), accepted)
+    }
+
+    private fun waitForStopControl(): androidx.test.uiautomator.UiObject2 {
+        // The record button becomes the stop control once the session runs.
+        val stop = device.wait(
+            Until.findObject(By.text(Pattern.compile("stop recording", Pattern.CASE_INSENSITIVE))),
+            30_000
+        )
+        assertNotNull("stop control never appeared; recording did not start: " + windowDump(), stop)
+        return stop!!
+    }
+
+    /**
+     * Container, size, dimensions and a decodable, non-blank frame at
+     * [frameUs]; also that no in-progress file leaked into the list.
+     */
+    private fun assertPlayableVideo(recording: File, frameUs: Long, what: String) {
+        assertTrue("$what recording suspiciously small: ${recording.length()}",
+            recording.length() > 10_000)
         assertNull("active marker must clear after stop", RecordingStore.activeName(context))
 
         // Container sanity: ISO BMFF 'ftyp' box near the start.
@@ -116,27 +171,51 @@ class ScreenRecordTest {
         recording.inputStream().use { it.read(head) }
         assertEquals("ftyp", String(head, 4, 4))
 
-        // Probe the video: real dimensions, multi-second duration, and a
-        // mid frame that is not a uniform fill (the screen had content).
         val retriever = MediaMetadataRetriever()
         retriever.setDataSource(recording.absolutePath)
         val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
         val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-        val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
         assertTrue("no video dimensions in $recording", (width ?: 0) >= 200 && (height ?: 0) >= 200)
-        assertTrue("duration ${durationMs}ms shorter than the recorded window", (durationMs ?: 0) >= 3_000)
-        val frame: Bitmap? = retriever.getFrameAtTime(1_500_000)
-        assertNotNull("no decodable frame at 1.5s", frame)
-        assertTrue("mid frame looks uniform (blank capture?)", frameHasContent(frame!!))
+        val frame: Bitmap? = retriever.getFrameAtTime(frameUs)
+        assertNotNull("$what: no decodable frame at ${frameUs}us", frame)
+        assertTrue("$what: frame looks uniform (blank capture?)", frameHasContent(frame!!))
+        retriever.release()
+    }
 
-        // Evidence for CI pull: the video itself and its mid frame.
-        val evidence = context.getExternalFilesDir("recordings-evidence")!!
-        evidence.mkdirs()
-        evidence.listFiles()?.forEach { it.delete() }
+    private fun assertElapsed(recording: File, minimumMs: Long, maximumMs: Long, what: String) {
+        val retriever = MediaMetadataRetriever()
+        retriever.setDataSource(recording.absolutePath)
+        val durationMs =
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+        retriever.release()
+        assertTrue(
+            "$what: duration ${durationMs}ms shorter than the recorded window (${minimumMs}ms min)",
+            (durationMs ?: 0) >= minimumMs
+        )
+        assertTrue(
+            "$what: duration ${durationMs}ms far beyond the recorded window (${maximumMs}ms max)",
+            (durationMs ?: Long.MAX_VALUE) <= maximumMs
+        )
+    }
+
+    private fun evidenceDir(): File {
+        val dir = context.getExternalFilesDir("recordings-evidence")!!
+        dir.mkdirs()
+        return dir
+    }
+
+    private fun copyEvidence(recording: File, frameName: String, frameUs: Long) {
+        val evidence = evidenceDir()
         recording.copyTo(File(evidence, recording.name), overwrite = true)
-        File(evidence, "mid-frame.png").outputStream().use {
-            frame.compress(Bitmap.CompressFormat.PNG, 100, it)
+        val retriever = MediaMetadataRetriever()
+        retriever.setDataSource(recording.absolutePath)
+        val frame = retriever.getFrameAtTime(frameUs)
+        if (frame != null) {
+            File(evidence, frameName).outputStream().use {
+                frame.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
         }
+        retriever.release()
     }
 
     private fun launchMain() {
