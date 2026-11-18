@@ -143,8 +143,10 @@ class ScreenRecordTest {
     }
 
     private fun clickAppButton(label: String) {
-        val obj = device.wait(Until.findObject(
-            By.text(Pattern.compile(Pattern.quote(label), Pattern.CASE_INSENSITIVE)), 15_000
+        val obj = device.wait(
+            Until.findObject(
+                By.text(Pattern.compile(Pattern.quote(label), Pattern.CASE_INSENSITIVE))
+            ), 15_000
         )
         assertNotNull("button '$label' not found: " + windowDump(), obj)
         obj!!.click()
