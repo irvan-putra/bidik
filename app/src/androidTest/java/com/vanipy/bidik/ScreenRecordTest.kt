@@ -2,13 +2,16 @@ package com.vanipy.bidik
 
 import android.app.Instrumentation
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -36,6 +39,7 @@ class ScreenRecordTest {
     private val instrumentation: Instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context: Context = instrumentation.targetContext
     private lateinit var device: UiDevice
+    private var scenario: ActivityScenario<MainActivity>? = null
 
     @Before
     fun setUp() {
@@ -47,6 +51,20 @@ class ScreenRecordTest {
         device.waitForIdle(5_000)
         RecordingStore.dir(context).listFiles()?.forEach { it.delete() }
         RecordingStore.clearActive(context)
+    }
+
+    @After
+    fun tearDown() {
+        // Never leave a recording session or an activity behind a test.
+        if (RecordingStore.activeName(context) != null) {
+            context.startService(
+                Intent(context, ScreenRecordService::class.java)
+                    .setAction(ScreenRecordService.ACTION_STOP)
+            )
+            Thread.sleep(2_000)
+        }
+        scenario?.close()
+        scenario = null
     }
 
     @Test
@@ -112,11 +130,11 @@ class ScreenRecordTest {
     }
 
     private fun launchMain() {
-        val pm = context.packageManager
-        val intent = pm.getLaunchIntentForPackage(context.packageName)!!.apply {
-            addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        }
-        context.startActivity(intent)
+        // ActivityScenario (the pattern the other instrumented tests use
+        // successfully on this emulator) reliably brings the activity to
+        // the front; a raw context.startActivity raced the launcher and
+        // the activity never became visible (run 44368283083).
+        scenario = ActivityScenario.launch(MainActivity::class.java)
         assertNotNull(
             "app did not come to the front: " + windowDump(),
             device.wait(Until.findObject(By.text("Run capture")), 30_000)
