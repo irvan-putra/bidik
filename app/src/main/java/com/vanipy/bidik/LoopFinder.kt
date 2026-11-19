@@ -25,8 +25,11 @@ package com.vanipy.bidik
  *
  * The seam score is the endpoint similarity: 1.0 means the first and
  * last frame are identical, so the exported GIF wraps without a jump.
- * Candidates are ranked by seam (higher first), then by shorter span:
- * the tightest single cycle wins over many repeats of it.
+ * Candidates are ranked with a seam tolerance: within
+ * [RANK_SEAM_EPSILON] of the best seam the tightest single cycle wins,
+ * because a two-cycle span can edge out one cycle on codec noise alone
+ * (run 44457037709: 3150ms at seam 1.0 over 1400ms at 0.99996), and
+ * exporting two cycles plays the motion twice.
  *
  * All scores are motion-weighted: cells that never change during the
  * sampled window play no part in the average (see [activityWeights]).
@@ -42,6 +45,9 @@ object LoopFinder {
 
     /** Shortest span that can play as a loop, in milliseconds. */
     const val MIN_LOOP_MS: Long = 400
+
+    /** Seam tolerance inside which a shorter span outranks a longer one. */
+    const val RANK_SEAM_EPSILON: Double = 0.005
 
     /** One sampled frame as a downscaled luma grid. */
     class Frame(
@@ -262,7 +268,15 @@ object LoopFinder {
         for (idx in found.indices) {
             if (foundDeparture[idx] >= 0.8 * maxDeparture) eligible.add(found[idx])
         }
-        eligible.sortWith(compareByDescending<Candidate> { it.seam }.thenBy { it.endMs - it.startMs })
+        // Ranking: within RANK_SEAM_EPSILON of the best seam, the
+        // tightest single cycle wins (see the class doc); only a
+        // clearly better seam justifies a longer span.
+        val bestSeam = eligible.maxOfOrNull { it.seam } ?: 0.0
+        eligible.sortWith(
+            compareBy<Candidate> { if (it.seam >= bestSeam - RANK_SEAM_EPSILON) 0 else 1 }
+                .thenBy { it.endMs - it.startMs }
+                .thenByDescending { it.seam }
+        )
         val picked = ArrayList<Candidate>()
         for (c in eligible) {
             if (picked.size >= maxCandidates) break

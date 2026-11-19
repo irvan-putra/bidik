@@ -60,6 +60,29 @@ class LoopFinderTest {
     }
 
     /**
+     * A two-cycle span can read a hair cleaner than one cycle (codec
+     * noise grows with what happens between the endpoints, not at
+     * them). Within seam noise the tightest single cycle must still
+     * rank first - the exported GIF must not play the motion twice
+     * (emulator run 44457037709 ranked 3150ms over the true 1400ms).
+     */
+    @Test
+    fun singleCycleWinsOverTwoCyclesWithinSeamNoise() {
+        val frames = periodic(25).toMutableList()
+        // Dirty one endpoint cell of the (0, 800) pair by a single
+        // luma step: its seam drops just below the spotless (0, 1600).
+        val f800 = frames[4].luma
+        f800[1 * w + 0] = 219.toByte()
+        val result = LoopFinder.find(frames)
+        assertTrue("expected loop candidates", result.candidates.isNotEmpty())
+        val top = result.candidates.first()
+        assertEquals(
+            "candidates: " + result.candidates.joinToString { "${it.startMs}-${it.endMs}@${it.seam}" },
+            800L, top.endMs - top.startMs
+        )
+    }
+
+    /**
      * A single blinking cell on a static screen: one cell of 48 changes,
      * so a whole-grid mean stays under the motion gate and every seam
      * reads ~1.0. Motion weighting must still find the real 400ms
