@@ -49,6 +49,7 @@ object JinContract {
     const val E_UNKNOWN_METHOD = "UNKNOWN_METHOD"
     const val E_FUTURE_TS = "FUTURE_TIMESTAMP"
     const val E_CHAT_NOT_GRANTED = "CHAT_NOT_GRANTED"
+    const val E_STAGE_INCOMPLETE = "STAGE_INCOMPLETE"
 
     const val S_QUEUED = "QUEUED"
     const val S_SENT_TO_RELAY = "SENT_TO_RELAY"
