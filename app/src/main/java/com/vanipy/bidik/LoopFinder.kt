@@ -12,10 +12,13 @@ package com.vanipy.bidik
  * Frames are small luma grids (e.g. 32x18), so similarity is a mean
  * absolute difference over the grid. Two rules keep the match honest:
  *
- * - a candidate span must contain real motion: the largest difference
- *   between consecutive frames inside the span has to clear
- *   [motionMin]. Without this, a static screen (or a static background
- *   dominating the average) "loops" trivially everywhere.
+ * - a candidate span must contain real motion, twice: the screen has
+ *   to change at least two separate times inside the span (it goes
+ *   somewhere AND comes back), and it has to depart from its start
+ *   frame by at least [motionMin] somewhere in between. Without this,
+ *   a static screen (or a static background dominating the average)
+ *   "loops" trivially, and a one-time change - like a button relabel
+ *   when recording starts - fakes a cycle.
  * - rows given as skipped (status bar / navigation bar bands when the
  *   recording crops them, see RecordOptions) play no part in the
  *   average, so a clock change in the bar cannot break or fake a match.
@@ -26,6 +29,9 @@ package com.vanipy.bidik
  * the tightest single cycle wins over many repeats of it.
  */
 object LoopFinder {
+
+    /** Shortest span that can play as a loop, in milliseconds. */
+    const val MIN_LOOP_MS: Long = 400
 
     /** One sampled frame as a downscaled luma grid. */
     class Frame(
@@ -68,19 +74,37 @@ object LoopFinder {
         return 1.0 - (sum.toDouble() / count) / 255.0
     }
 
-    /** Largest dissimilarity between consecutive frames in [from, to]. */
-    private fun interiorMotion(frames: List<Frame>, from: Int, to: Int): Double {
-        var worst = 0.0
+    /** Number of distinct moments the screen changed inside [from, to]. */
+    private fun motionEvents(frames: List<Frame>, from: Int, to: Int, min: Double): Int {
+        var events = 0
         for (k in from until to) {
-            val d = 1.0 - similarity(frames[k], frames[k + 1])
+            if (1.0 - similarity(frames[k], frames[k + 1]) >= min) events++
+        }
+        return events
+    }
+
+    /** Largest dissimilarity between the start frame and any interior frame. */
+    private fun departure(frames: List<Frame>, from: Int, to: Int): Double {
+        var worst = 0.0
+        for (k in from + 1 until to) {
+            val d = 1.0 - similarity(frames[from], frames[k])
             if (d > worst) worst = d
         }
         return worst
     }
 
+    /**
+     * A span plays as a loop only if the screen goes somewhere and comes
+     * back: it departs from the start frame and changes at least twice
+     * (once away, once back). One-time changes fail this.
+     */
+    private fun hasCycleMotion(frames: List<Frame>, from: Int, to: Int, min: Double): Boolean {
+        return departure(frames, from, to) >= min && motionEvents(frames, from, to, min) >= 2
+    }
+
     fun find(
         frames: List<Frame>,
-        minLoopMs: Long = 400,
+        minLoopMs: Long = MIN_LOOP_MS,
         maxLoopMs: Long = 30_000,
         seamThreshold: Double = 0.90,
         motionMin: Double = 0.02,
@@ -103,7 +127,7 @@ object LoopFinder {
                         best = Candidate(t0, frames[j].timeMs, seam)
                     }
                     if (seam >= seamThreshold &&
-                        interiorMotion(frames, i, j) >= motionMin
+                        hasCycleMotion(frames, i, j, motionMin)
                     ) {
                         found.add(Candidate(t0, frames[j].timeMs, seam))
                     }
@@ -119,11 +143,12 @@ object LoopFinder {
         }
         val bestEffort = if (picked.isEmpty() &&
             best != null &&
-            interiorMotion(
+            hasCycleMotion(
                 frames,
                 indexOfTime(frames, best.startMs),
-                indexOfTime(frames, best.endMs)
-            ) >= motionMin
+                indexOfTime(frames, best.endMs),
+                motionMin
+            )
         ) {
             best
         } else {

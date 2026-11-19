@@ -84,6 +84,11 @@ object LoopAnalyzer {
         val start = bestStart ?: return null
         var best: LoopFinder.Candidate? = null
         for ((t, luma) in endGrid) {
+            // The fine windows around the coarse endpoints can overlap
+            // for short spans; never let the end collapse onto (or
+            // before) the start - a zero-length "loop" always matches
+            // itself perfectly.
+            if (t - start.timeMs < LoopFinder.MIN_LOOP_MS) continue
             val seam = LoopFinder.similarity(start, frameAt(t, luma))
             if (best == null || seam > best.seam) {
                 best = LoopFinder.Candidate(start.timeMs, t, seam)

@@ -207,7 +207,7 @@ class ScreenRecordTest {
     @Test
     fun autoStopSavesWithoutInteraction() {
         RecordOptions.setDelaySeconds(context, 0)
-        RecordOptions.setAutoStopSeconds(context, 5)
+        RecordOptions.setAutoStopSeconds(context, 15)
         launchMain()
         clickAppButton("Record screen")
         clickFirstSystemOption(10_000, "Entire screen")
@@ -215,10 +215,10 @@ class ScreenRecordTest {
         assertTrue("consent dialog never appeared: " + windowDump(), accepted)
 
         // No further interaction: the session must end and save alone.
-        val recording = waitForRecording(30_000)
+        val recording = waitForRecording(45_000)
         assertNotNull("auto-stop never saved the recording", recording)
         assertPlayableVideo(recording!!, frameUs = 1_000_000, what = "auto-stop")
-        assertElapsed(recording, minimumMs = 4_000, maximumMs = 12_000, what = "auto-stop")
+        assertElapsed(recording, minimumMs = 13_000, maximumMs = 25_000, what = "auto-stop")
         copyEvidence(recording, "autostop-frame.png", frameUs = 2_000_000)
     }
 
@@ -240,6 +240,8 @@ class ScreenRecordTest {
         val full = waitForRecording(30_000)
         assertNotNull(full)
         val fullDims = videoDims(full!!)
+        val fullFrame = frameAt(full, 1_500_000)
+        assertNotNull(fullFrame)
 
         RecordingStore.dir(context).listFiles()?.forEach { it.delete() }
         RecordOptions.setBarsHidden(context, true)
@@ -260,9 +262,7 @@ class ScreenRecordTest {
 
         // Pixel proof: the cropped frame is the middle band of the full
         // frame, not the top of it (which holds the status bar).
-        val fullFrame = frameAt(full, 1_500_000)
         val croppedFrame = frameAt(cropped, 1_500_000)
-        assertNotNull(fullFrame)
         assertNotNull(croppedFrame)
         val mad = bandDifference(fullFrame!!, bands.topPx, croppedFrame!!)
         assertTrue("cropped frame differs from the matching full-frame band (mad=$mad)", mad < 25.0)
@@ -277,13 +277,23 @@ class ScreenRecordTest {
      */
     @Test
     fun loopFoundAndGifExported() {
-        startConsentedRecording()
+        launchMain()
+        // Flip the full screen black/white every 400ms: an 800ms cycle
+        // of real on-screen motion for the loop search to find. The
+        // first color goes up before consent so sampled frames are all
+        // part of the cycle.
+        scenario!!.onActivity {
+            it.window.decorView.setBackgroundColor(0xFF000000.toInt())
+            it.status.setBackgroundColor(0xFF000000.toInt())
+        }
+        clickAppButton("Record screen")
+        clickFirstSystemOption(10_000, "Entire screen")
+        val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
+        assertTrue("consent dialog never appeared: " + windowDump(), accepted)
         waitForStopControl()
 
-        // Flip a full-width band black/white every 400ms: an 800ms cycle
-        // of real on-screen motion for the loop search to find.
         val deadline = System.currentTimeMillis() + 6_400
-        var dark = false
+        var dark = true
         while (System.currentTimeMillis() < deadline) {
             dark = !dark
             val color = if (dark) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
@@ -342,17 +352,27 @@ class ScreenRecordTest {
 
     @Test
     fun noLoopInNonRepeatingRecording() {
-        startConsentedRecording()
+        launchMain()
+        // Six grays, pairwise 51 luma apart (seam <= 0.80, under the
+        // 0.90 bar): real motion, but the screen never returns to an
+        // earlier state, so a clean loop must NOT be reported. The first
+        // gray goes up before consent so the recording contains only the
+        // non-repeating sequence. bestEffort (below the bar) is allowed;
+        // a confident candidate is not.
+        val colors = intArrayOf(
+            0xFF000000.toInt(), 0xFF333333.toInt(), 0xFF666666.toInt(),
+            0xFF999999.toInt(), 0xFFCCCCCC.toInt(), 0xFFFFFFFF.toInt()
+        )
+        scenario!!.onActivity {
+            it.window.decorView.setBackgroundColor(colors[0])
+            it.status.setBackgroundColor(colors[0])
+        }
+        clickAppButton("Record screen")
+        clickFirstSystemOption(10_000, "Entire screen")
+        val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
+        assertTrue("consent dialog never appeared: " + windowDump(), accepted)
         waitForStopControl()
 
-        // Six distinct full-screen colors, shown once each: real motion,
-        // but the screen never returns to an earlier state, so a clean
-        // loop must NOT be reported. bestEffort (below the seam bar) is
-        // allowed; a confident candidate is not.
-        val colors = intArrayOf(
-            0xFF2020C0.toInt(), 0xFF20C020.toInt(), 0xFFC02020.toInt(),
-            0xFF20C0C0.toInt(), 0xFFC020C0.toInt(), 0xFFC0C020.toInt()
-        )
         for (color in colors) {
             scenario!!.onActivity {
                 it.window.decorView.setBackgroundColor(color)
