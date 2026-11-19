@@ -48,10 +48,20 @@ class AndroidJinProviderCalls(private val resolver: ContentResolver) : JinProvid
  * inbox the owner granted; there is no push in v1, so commands arrive
  * only when Bidik polls, typically while it is in the foreground).
  *
- * Every send takes a caller-supplied token (fresh UUID per new send,
- * reused only for retrying the SAME send): Jin dedups token + content
- * hash, so a retry of the same body returns the original ref and a
- * different body under an old token fails closed with TOKEN_REUSED.
+ * Every send takes a caller-supplied token. Token discipline (contract
+ * v1): a fresh UUID per NEW send; retrying an unanswered send ALWAYS
+ * reuses that send's token and body. Minting a fresh token to retry
+ * the same logical send is a contract violation - a fresh token is a
+ * NEW send and duplicates the message when the original commit landed.
+ *
+ * Recovery: a same-token retry of the same body returns the original
+ * ref without re-sending (text: 7-day ledger; file: retained bytes for
+ * ~10 minutes, then EXPIRED on a bare commit). sendFile stages before
+ * every commit, so a file retry after EXPIRED simply calls sendFile
+ * again with the same token, bytes and metadata - the provider
+ * re-verifies identity against the ledger and returns the original
+ * ref. TOKEN_REUSED always means a body/token mismatch: fail closed,
+ * never swap bodies under one token.
  */
 class JinClient(private val provider: JinProviderCalls) {
 
@@ -155,7 +165,18 @@ class JinClient(private val provider: JinProviderCalls) {
                 .put("text", text)
                 .put("filename", filename)
                 .put("mime", mime)
-            return commit(token, meta)
+            try {
+                return commit(token, meta)
+            } catch (e: JinException) {
+                // The provider's retry path does not await the drain's EOF
+                // marker, so an immediate same-token re-stage + commit can
+                // report EXPIRED while the bytes are still landing. One
+                // bounded commit retry absorbs that race; a second EXPIRED
+                // is real and surfaces.
+                if (e.code != JinContract.E_EXPIRED) throw e
+                Thread.sleep(300)
+                return commit(token, meta)
+            }
         } catch (e: Exception) {
             try {
                 provider.call(JinContract.M_CANCEL, token, null)

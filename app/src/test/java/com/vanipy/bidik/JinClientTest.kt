@@ -36,13 +36,24 @@ class JinClientTest {
     ) : JinProviderCalls {
         val stagedBytes = HashMap<String, ByteArray>()
         val cancelled = HashSet<String>()
-        val ledger = HashMap<String, Pair<String, String>>() // token -> (hash, ref)
+        val ledger = HashMap<String, Pair<String, String>>() // token -> (canon, ref)
+        val swept = HashSet<String>() // tokens whose retained bytes aged out
+        val committedBytes = HashMap<String, ByteArray>() // token -> committed content
         var lastMeta: JSONObject? = null
         var lastMethod: String? = null
         var refCounter = 0
         var inboxJson = "[]"
         var inboxCursor = "0"
         var listChatsJson = "[]"
+
+        private fun metaCanon(meta: JSONObject) =
+            "send|" + meta.optString("chat") + "|" + meta.optString("text") +
+                "|" + meta.optString("filename") + "|" + meta.optString("mime")
+
+        private fun refBundle(ref: String) = ok().apply {
+            putString(JinContract.K_REF, ref)
+            putString(JinContract.K_STATUS, JinContract.S_QUEUED)
+        }
 
         override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
             lastMethod = method
@@ -67,23 +78,43 @@ class JinClientTest {
                     if (!botRunning) return err(JinContract.E_BOT_NOT_RUNNING)
                     val meta = JSONObject(extras!!.getString(JinContract.K_META)!!)
                     lastMeta = meta
-                    val fileBytes = stagedBytes[arg]
-                    val canon = "send|" + meta.optString("chat") + "|" + meta.optString("text") +
-                        "|" + meta.optString("filename") + "|" + meta.optString("mime") + "|" +
-                        (fileBytes?.size?.toString() ?: "")
                     val existing = ledger[arg]
                     if (existing != null) {
-                        return if (existing.first == canon) ok().apply {
-                            putString(JinContract.K_REF, existing.second)
-                            putString(JinContract.K_STATUS, JinContract.S_QUEUED)
-                        } else err(JinContract.E_TOKEN_REUSED)
+                        // Contract v1 retry path: meta must match; file sends
+                        // re-verify byte identity against retained (or freshly
+                        // re-staged) bytes; swept bytes fail with EXPIRED.
+                        val storedMeta = existing.first.substringBeforeLast("|")
+                        val storedSize = existing.first.substringAfterLast("|")
+                        if (metaCanon(meta) != storedMeta) return err(JinContract.E_TOKEN_REUSED)
+                        if (storedSize.isEmpty()) return refBundle(existing.second)
+                        // Mirror the provider's bounded wait for the drain's
+                        // EOF before concluding bytes are absent.
+                        var waitMs = 0
+                        while (stagedBytes[arg] == null && waitMs < 2_000) {
+                            Thread.sleep(20); waitMs += 20
+                        }
+                        val bytes = stagedBytes[arg]
+                        if (bytes == null && arg in swept) return err(JinContract.E_EXPIRED)
+                        // The real provider re-hashes the bytes (SHA-256);
+                        // the fake pins content identity by size + content.
+                        if (bytes == null || bytes.size.toString() != storedSize ||
+                            !bytes.contentEquals(committedBytes[arg])
+                        ) return err(JinContract.E_TOKEN_REUSED)
+                        return refBundle(existing.second)
                     }
+                    // Same bounded drain wait as the retry path: the real
+                    // provider consumes staged bytes to EOF before commit,
+                    // so canon must be computed after the bytes land.
+                    var firstWaitMs = 0
+                    while (stagedBytes[arg] == null && firstWaitMs < 2_000) {
+                        Thread.sleep(20); firstWaitMs += 20
+                    }
+                    val fileBytes = stagedBytes[arg]
+                    val canon = metaCanon(meta) + "|" + (fileBytes?.size?.toString() ?: "")
                     val ref = "m${++refCounter}"
                     ledger[arg!!] = canon to ref
-                    ok().apply {
-                        putString(JinContract.K_REF, ref)
-                        putString(JinContract.K_STATUS, JinContract.S_QUEUED)
-                    }
+                    if (fileBytes != null) committedBytes[arg] = fileBytes
+                    refBundle(ref)
                 }
                 JinContract.M_STATUS -> ok().apply {
                     putString(JinContract.K_STATUS, JinContract.S_SENT_TO_RELAY)
@@ -268,6 +299,39 @@ class JinClientTest {
             assertEquals(JinContract.E_BOT_NOT_RUNNING, e.code)
         }
         assertTrue(token in fake.cancelled)
+    }
+
+    @Test
+    fun fileRetryAfterSweepRestagesSameTokenAndRecoversOriginalRef() {
+        val fake = FakeJin()
+        val client = JinClient(fake)
+        val token = client.newToken()
+        val payload = ByteArray(5_000) { (it % 13).toByte() }
+        val first = client.sendFile(token, "h", "clip", tmpFile(payload), "c.mp4", "video/mp4")
+        assertEquals("m1", first.ref)
+        // The commit response is lost and Jin's retained bytes age out.
+        fake.stagedBytes.clear()
+        fake.swept.add(token)
+        // Contract recovery: same token, same bytes, same metadata.
+        val recovered = client.sendFile(token, "h", "clip", tmpFile(payload), "c.mp4", "video/mp4")
+        assertEquals("m1", recovered.ref)
+        assertEquals(1, fake.refCounter) // no duplicate send was minted
+    }
+
+    @Test
+    fun restagedDifferentBytesAfterSweepAreRejected() {
+        val fake = FakeJin()
+        val client = JinClient(fake)
+        val token = client.newToken()
+        client.sendFile(token, "h", "clip", tmpFile(ByteArray(5_000) { 1 }), "c.mp4", "video/mp4")
+        fake.stagedBytes.clear()
+        fake.swept.add(token)
+        try {
+            client.sendFile(token, "h", "clip", tmpFile(ByteArray(5_000) { 2 }), "c.mp4", "video/mp4")
+            fail("expected TOKEN_REUSED")
+        } catch (e: JinException) {
+            assertEquals(JinContract.E_TOKEN_REUSED, e.code)
+        }
     }
 
     @Test
