@@ -271,37 +271,71 @@ class ScreenRecordTest {
     }
 
     /**
-     * End to end for the GIF path: record a periodically changing
-     * screen, let the loop search find the cycle, export its span, and
+     * End to end for the GIF path: record a structured, cyclical
+     * target - a bright marker stepping through four corner positions
+     * over a static dark-slate background, 400ms per phase, a 1.6s
+     * cycle - let the loop search find the cycle, export its span, and
      * verify the GIF's marker, frame count, size and decodability.
+     *
+     * The target is deliberately not a flat full-screen blink: a
+     * mostly-black frame pair could be endpoint-identical without any
+     * meaningful recurrence, so the marker and background give every
+     * sampled frame real structure. Seam evidence therefore covers the
+     * frames NEIGHBORING the endpoints too: identical endpoints alone
+     * could hide a jump at the wrap, and matching the frames one phase
+     * after both endpoints shows the wrap continues the same motion
+     * step as the loop interior.
      */
     @Test
     fun loopFoundAndGifExported() {
         launchMain()
-        // Flip the full screen black/white every 400ms: an 800ms cycle
-        // of real on-screen motion for the loop search to find. The
-        // first color goes up before consent so sampled frames are all
-        // part of the cycle.
+        val bg = 0xFF334455.toInt()
+        val markerColor = 0xFFFFFF00.toInt()
+        val sizePx = 120
+        val phaseMs = 400L
+        val laidOut = java.util.concurrent.CountDownLatch(1)
+        lateinit var marker: android.widget.ImageView
+        var baseX = 0f
+        var baseY = 0f
+        var stepX = 0f
+        var stepY = 0f
+        // Phase 0 goes up BEFORE consent so every sampled frame is part
+        // of the cycle.
         scenario!!.onActivity {
-            it.window.decorView.setBackgroundColor(0xFF000000.toInt())
-            it.status.setBackgroundColor(0xFF000000.toInt())
+            it.window.decorView.setBackgroundColor(bg)
+            it.status.setBackgroundColor(bg)
+            marker = android.widget.ImageView(it)
+            marker.setBackgroundColor(markerColor)
+            val root = it.window.decorView
+                .findViewById<android.widget.FrameLayout>(android.R.id.content)
+            root.addView(marker, android.widget.FrameLayout.LayoutParams(sizePx, sizePx))
+            marker.post {
+                stepX = root.width / 4f
+                stepY = root.height / 6f
+                baseX = (root.width - sizePx) / 2f
+                baseY = (root.height - sizePx) / 2f
+                marker.x = baseX - stepX
+                marker.y = baseY - stepY
+                laidOut.countDown()
+            }
         }
+        assertTrue("marker view never laid out", laidOut.await(5, java.util.concurrent.TimeUnit.SECONDS))
         clickAppButton("Record screen")
         clickFirstSystemOption(10_000, "Entire screen")
         val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
         assertTrue("consent dialog never appeared: " + windowDump(), accepted)
         waitForStopControl()
 
-        val deadline = System.currentTimeMillis() + 6_400
-        var dark = true
+        val deadline = System.currentTimeMillis() + 6_800
+        var phase = 0
         while (System.currentTimeMillis() < deadline) {
-            dark = !dark
-            val color = if (dark) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+            phase = (phase + 1) % 4
+            val p = phase
             scenario!!.onActivity {
-                it.window.decorView.setBackgroundColor(color)
-                it.status.setBackgroundColor(color)
+                marker.x = baseX + (if (p == 1 || p == 2) stepX else -stepX)
+                marker.y = baseY + (if (p >= 2) stepY else -stepY)
             }
-            Thread.sleep(400)
+            Thread.sleep(phaseMs)
         }
         waitForStopControl().click()
         val recording = waitForRecording(30_000)
@@ -312,8 +346,8 @@ class ScreenRecordTest {
         val top = result.candidates.first()
         assertTrue("seam ${top.seam} too low for the periodic screen", top.seam >= 0.95)
         assertTrue(
-            "loop span ${top.startMs}-${top.endMs} is not the ~800ms cycle",
-            top.endMs - top.startMs in 500..1_500
+            "loop span ${top.startMs}-${top.endMs} is not the ~1.6s cycle",
+            top.endMs - top.startMs in 1_200..2_000
         )
 
         val gif = java.io.File(context.cacheDir, "loop-test.gif")
@@ -340,6 +374,13 @@ class ScreenRecordTest {
         // Seam evidence at full resolution: the source frames at the
         // loop endpoints must be (nearly) the same picture, or the GIF
         // visibly jumps at the wrap. Saved as PNGs for eyeballing.
+        val durationMs = run {
+            val r = MediaMetadataRetriever()
+            r.setDataSource(recording.absolutePath)
+            val d = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)!!.toLong()
+            r.release()
+            d
+        }
         val seamA = frameAt(recording, top.startMs * 1000L)
         val seamB = frameAt(recording, top.endMs * 1000L)
         assertNotNull("no frame at loop start", seamA)
@@ -348,6 +389,56 @@ class ScreenRecordTest {
         assertTrue("loop endpoints differ on screen (MAD $mad)", mad <= 12.0)
         saveEvidenceBitmap("loop-seam-start.png", seamA)
         saveEvidenceBitmap("loop-seam-end.png", seamB)
+
+        // Neighbor evidence one phase (400ms) past the endpoints. If
+        // the wrap jumped, only the endpoints would match; the frames
+        // one phase on must continue the same motion step on both
+        // sides. OPTION_CLOSEST reads the frame nearest the requested
+        // time, not the nearest sync frame, so the phase offset is real.
+        val nextA = if (top.endMs + phaseMs < durationMs)
+            frameAt(recording, (top.startMs + phaseMs) * 1000L, MediaMetadataRetriever.OPTION_CLOSEST) else null
+        val nextB = if (nextA != null)
+            frameAt(recording, (top.endMs + phaseMs) * 1000L, MediaMetadataRetriever.OPTION_CLOSEST) else null
+        if (nextA != null && nextB != null) {
+            val madNext = meanAbsDiff(nextA, nextB)
+            assertTrue(
+                "frames one phase after the loop endpoints differ (MAD $madNext)",
+                madNext <= 12.0
+            )
+            saveEvidenceBitmap("loop-seam-start-next.png", nextA)
+            saveEvidenceBitmap("loop-seam-end-next.png", nextB)
+        } else {
+            assertTrue("loop starts at 0: no earlier neighbor frame", top.startMs >= phaseMs)
+            val prevA = frameAt(recording, (top.startMs - phaseMs) * 1000L, MediaMetadataRetriever.OPTION_CLOSEST)
+            val prevB = frameAt(recording, (top.endMs - phaseMs) * 1000L, MediaMetadataRetriever.OPTION_CLOSEST)
+            assertNotNull(prevA)
+            assertNotNull(prevB)
+            val madPrev = meanAbsDiff(prevA!!, prevB!!)
+            assertTrue(
+                "frames one phase before the loop endpoints differ (MAD $madPrev)",
+                madPrev <= 12.0
+            )
+            saveEvidenceBitmap("loop-seam-start-prev.png", prevA)
+            saveEvidenceBitmap("loop-seam-end-prev.png", prevB)
+        }
+
+        // The target is structured, not a flat blink: the mid-loop
+        // frame shows the marker in the opposite position (real motion
+        // between phases), and the seam frame itself carries structure
+        // beyond the bare background color.
+        val mid = frameAt(
+            recording,
+            (top.startMs + (top.endMs - top.startMs) / 2) * 1000L,
+            MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        assertNotNull(mid)
+        val motion = meanAbsDiff(seamA, mid!!)
+        assertTrue("mid-loop frame shows no motion against the seam (MAD $motion)", motion > 8.0)
+        saveEvidenceBitmap("loop-mid-frame.png", mid)
+        val flat = android.graphics.Bitmap.createBitmap(seamA.width, seamA.height, seamA.config)
+        flat.eraseColor(bg)
+        val structure = meanAbsDiff(seamA, flat)
+        assertTrue("seam frame is the flat background (MAD $structure)", structure > 5.0)
     }
 
     @Test
@@ -435,10 +526,14 @@ class ScreenRecordTest {
         return w to h
     }
 
-    private fun frameAt(file: File, frameUs: Long): Bitmap? {
+    private fun frameAt(
+        file: File,
+        frameUs: Long,
+        option: Int = MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+    ): Bitmap? {
         val retriever = MediaMetadataRetriever()
         retriever.setDataSource(file.absolutePath)
-        val frame = retriever.getFrameAtTime(frameUs)
+        val frame = retriever.getFrameAtTime(frameUs, option)
         retriever.release()
         return frame
     }

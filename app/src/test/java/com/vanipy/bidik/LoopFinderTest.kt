@@ -7,7 +7,7 @@ import org.junit.Test
 
 /**
  * Loop matching on synthetic frame sequences: a toggling block is a
- * perfect 800ms loop; a static screen and a one-way change are not.
+ * exact 800ms recurrence; a static screen and a one-way change are not.
  * The bar-mask test shows a changing status-bar band cannot break or
  * fake a match when those rows are skipped.
  */
@@ -64,7 +64,7 @@ class LoopFinderTest {
         val frames = (0 until 25).map { k -> frameAt(k * 200L, blockCol = 0) }
         val result = LoopFinder.find(frames)
         assertTrue(result.candidates.isEmpty())
-        // A perfect match with no motion must not be offered as a guess.
+        // An identical match with no motion must not be offered as a guess.
         assertNull(result.bestEffort)
     }
 
