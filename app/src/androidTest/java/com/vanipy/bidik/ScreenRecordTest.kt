@@ -115,6 +115,7 @@ class ScreenRecordTest {
 
     @Test
     fun animatedRecordingPreservesElapsedTime() {
+        val before = recordingsPresent()
         startConsentedRecording()
         val stop = waitForStopControl()
 
@@ -130,7 +131,7 @@ class ScreenRecordTest {
         }
         stop.click()
 
-        val recording = waitForRecording(30_000)
+        val recording = waitForRecording(30_000, before)
         assertNotNull("no saved recording after stop: " + windowDump(), recording)
         assertPlayableVideo(recording!!, frameUs = 1_500_000, what = "animated")
         // Elapsed time must survive: 6s of motion, generous upper bound.
@@ -141,6 +142,7 @@ class ScreenRecordTest {
 
     @Test
     fun staticRecordingPreservesElapsedTime() {
+        val before = recordingsPresent()
         startConsentedRecording()
         val stop = waitForStopControl()
 
@@ -151,7 +153,7 @@ class ScreenRecordTest {
         Thread.sleep(6_000)
         stop.click()
 
-        val recording = waitForRecording(30_000)
+        val recording = waitForRecording(30_000, before)
         assertNotNull("no saved recording after stop: " + windowDump(), recording)
         assertPlayableVideo(recording!!, frameUs = 1_000_000, what = "static")
         assertElapsed(recording, minimumMs = 5_400, maximumMs = 20_000, what = "static")
@@ -172,6 +174,7 @@ class ScreenRecordTest {
         RecordOptions.setDelaySeconds(context, 5)
         val states = recordStatusStates()
         launchMain()
+        val before = recordingsPresent()
         clickAppButton("Record screen")
         clickFirstSystemOption(10_000, "Entire screen")
         val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
@@ -189,7 +192,7 @@ class ScreenRecordTest {
         Thread.sleep(3_000)
         waitForStopControl().click()
 
-        val recording = waitForRecording(30_000)
+        val recording = waitForRecording(30_000, before)
         assertNotNull("no saved recording after delayed start", recording)
         // Wall time consent-to-stop was ~8s; only the ~3s after the
         // countdown belong in the file.
@@ -209,13 +212,14 @@ class ScreenRecordTest {
         RecordOptions.setDelaySeconds(context, 0)
         RecordOptions.setAutoStopSeconds(context, 15)
         launchMain()
+        val before = recordingsPresent()
         clickAppButton("Record screen")
         clickFirstSystemOption(10_000, "Entire screen")
         val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
         assertTrue("consent dialog never appeared: " + windowDump(), accepted)
 
         // No further interaction: the session must end and save alone.
-        val recording = waitForRecording(45_000)
+        val recording = waitForRecording(45_000, before)
         assertNotNull("auto-stop never saved the recording", recording)
         assertPlayableVideo(recording!!, frameUs = 1_000_000, what = "auto-stop")
         assertElapsed(recording, minimumMs = 13_000, maximumMs = 25_000, what = "auto-stop")
@@ -233,11 +237,12 @@ class ScreenRecordTest {
         assertTrue("emulator must report a status bar", bands.topPx > 0)
 
         // Reference: full-screen recording of the untouched UI.
+        val before = recordingsPresent()
         startConsentedRecording()
         waitForStopControl()
         Thread.sleep(4_000)
         waitForStopControl().click()
-        val full = waitForRecording(30_000)
+        val full = waitForRecording(30_000, before)
         assertNotNull(full)
         val fullDims = videoDims(full!!)
         val fullFrame = frameAt(full, 1_500_000)
@@ -246,11 +251,12 @@ class ScreenRecordTest {
         RecordingStore.dir(context).listFiles()?.forEach { it.delete() }
         RecordOptions.setBarsHidden(context, true)
         scenario?.close()
+        val before2 = recordingsPresent()
         startConsentedRecording()
         waitForStopControl()
         Thread.sleep(4_000)
         waitForStopControl().click()
-        val cropped = waitForRecording(30_000)
+        val cropped = waitForRecording(30_000, before2)
         assertNotNull(cropped)
         val croppedDims = videoDims(cropped!!)
 
@@ -320,6 +326,7 @@ class ScreenRecordTest {
             }
         }
         assertTrue("marker view never laid out", laidOut.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        val before = recordingsPresent()
         clickAppButton("Record screen")
         clickFirstSystemOption(10_000, "Entire screen")
         val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
@@ -338,10 +345,20 @@ class ScreenRecordTest {
             Thread.sleep(phaseMs)
         }
         waitForStopControl().click()
-        val recording = waitForRecording(30_000)
+        val recording = waitForRecording(30_000, before)
         assertNotNull(recording)
 
         val result = LoopAnalyzer.analyze(recording!!)
+        // Evidence first: whatever the assertions decide, the analyzed
+        // clip and the search's own numbers land in the artifact.
+        recording.copyTo(java.io.File(evidenceDir(), "loop-source-" + recording.name), overwrite = true)
+        java.io.File(evidenceDir(), "loop-analysis.txt").writeText(
+            "duration recording=${recording.name} size=${recording.length()}\n" +
+            "candidates:\n" +
+            result.candidates.joinToString("\n") {
+                "  span=${it.startMs}-${it.endMs} seam=${it.seam}"
+            } + "\nbestEffort=${result.bestEffort}\n"
+        )
         assertTrue("no loop candidate in a periodic recording", result.candidates.isNotEmpty())
         val top = result.candidates.first()
         assertTrue("seam ${top.seam} too low for the periodic screen", top.seam >= 0.95)
@@ -458,6 +475,7 @@ class ScreenRecordTest {
             it.window.decorView.setBackgroundColor(colors[0])
             it.status.setBackgroundColor(colors[0])
         }
+        val before = recordingsPresent()
         clickAppButton("Record screen")
         clickFirstSystemOption(10_000, "Entire screen")
         val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
@@ -472,7 +490,7 @@ class ScreenRecordTest {
             Thread.sleep(400)
         }
         waitForStopControl().click()
-        val recording = waitForRecording(30_000)
+        val recording = waitForRecording(30_000, before)
         assertNotNull(recording)
 
         val result = LoopAnalyzer.analyze(recording!!)
@@ -717,11 +735,25 @@ class ScreenRecordTest {
         return false
     }
 
-    private fun waitForRecording(timeoutMs: Long): File? {
+    /**
+     * Recordings from earlier tests stay in the store, so "the newest
+     * file" is only this test's recording once the service has moved
+     * its .part into place. Snapshot the names present before the
+     * recording starts and wait for a NEW non-empty name; polling the
+     * newest file raced the finalize step and returned an earlier
+     * test's clip (run 44455167131 analyzed the tick-counter recording
+     * instead of the marker cycle).
+     */
+    private fun recordingsPresent(): Set<String> =
+        RecordingStore.list(context).map { it.name }.toSet()
+
+    private fun waitForRecording(timeoutMs: Long, before: Set<String>): File? {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            val files = RecordingStore.list(context)
-            if (files.isNotEmpty() && files[0].length() > 0) return files[0]
+            val fresh = RecordingStore.list(context).firstOrNull {
+                it.name !in before && it.length() > 0
+            }
+            if (fresh != null) return fresh
             Thread.sleep(500)
         }
         return null
