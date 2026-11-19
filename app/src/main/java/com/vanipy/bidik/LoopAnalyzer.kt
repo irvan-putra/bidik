@@ -21,8 +21,10 @@ object LoopAnalyzer {
     private const val FINE_FPS = 20
     private const val MAX_COARSE_FRAMES = 400
     private const val REFINE_WINDOW_MS = 400L
-    const val GRID_W = 32
-    const val GRID_H = 18
+    // 64x36 keeps small on-screen animations (a few dp of a widget)
+    // resolvable in the matching grids; 32x18 averaged them away.
+    const val GRID_W = 64
+    const val GRID_H = 36
 
     fun analyze(
         src: File,
@@ -50,7 +52,11 @@ object LoopAnalyzer {
             }
             val coarse = LoopFinder.find(frames)
             val top = coarse.candidates.firstOrNull() ?: return coarse
-            val refined = refine(retriever, top, skipTop, skipBottom) ?: return coarse
+            // Refine scores endpoints against the same motion weights the
+            // coarse pass found, so a small animated region keeps driving
+            // the match at 20 fps too.
+            val weights = LoopFinder.activityWeights(frames) ?: return coarse
+            val refined = refine(retriever, top, skipTop, skipBottom, weights) ?: return coarse
             return LoopFinder.Result(listOf(refined) + coarse.candidates.drop(1), null)
         } finally {
             retriever.release()
@@ -66,7 +72,8 @@ object LoopAnalyzer {
         retriever: MediaMetadataRetriever,
         coarse: LoopFinder.Candidate,
         skipTop: Int,
-        skipBottom: Int
+        skipBottom: Int,
+        weights: DoubleArray
     ): LoopFinder.Candidate? {
         val startGrid = window(retriever, coarse.startMs) ?: return null
         val endGrid = window(retriever, coarse.endMs) ?: return null
@@ -75,7 +82,9 @@ object LoopAnalyzer {
         var bestStart: LoopFinder.Frame? = null
         var bestStartSeam = -1.0
         for ((t, luma) in startGrid) {
-            val seam = LoopFinder.similarity(frameAt(t, luma), frameAt(coarse.endMs, endGrid[0].second))
+            val seam = LoopFinder.similarity(
+                frameAt(t, luma), frameAt(coarse.endMs, endGrid[0].second), weights
+            )
             if (seam > bestStartSeam) {
                 bestStartSeam = seam
                 bestStart = frameAt(t, luma)
@@ -89,7 +98,7 @@ object LoopAnalyzer {
             // before) the start - a zero-length "loop" always matches
             // itself perfectly.
             if (t - start.timeMs < LoopFinder.MIN_LOOP_MS) continue
-            val seam = LoopFinder.similarity(start, frameAt(t, luma))
+            val seam = LoopFinder.similarity(start, frameAt(t, luma), weights)
             if (best == null || seam > best.seam) {
                 best = LoopFinder.Candidate(start.timeMs, t, seam)
             }

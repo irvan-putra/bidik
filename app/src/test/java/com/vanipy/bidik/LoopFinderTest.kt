@@ -59,6 +59,53 @@ class LoopFinderTest {
         assertNull(result.bestEffort)
     }
 
+    /**
+     * A single blinking cell on a static screen: one cell of 48 changes,
+     * so a whole-grid mean stays under the motion gate and every seam
+     * reads ~1.0. Motion weighting must still find the real 400ms
+     * period instead of missing the loop or matching an arbitrary span.
+     */
+    @Test
+    fun smallAnimatedRegionIsDetectedAtItsRealPeriod() {
+        val frames = (0 until 30).map { k ->
+            val luma = ByteArray(w * h) { 20 }
+            if (k % 2 == 0) luma[3 * w + 5] = 220.toByte()
+            LoopFinder.Frame(k * 200L, w, h, luma)
+        }
+        val result = LoopFinder.find(frames)
+        assertTrue("expected the blinking cell's loop", result.candidates.isNotEmpty())
+        val top = result.candidates.first()
+        assertEquals(400L, top.endMs - top.startMs)
+        assertTrue("seam ${top.seam} too low", top.seam >= 0.99)
+    }
+
+    /**
+     * A slow small oscillation (below the motion gate per step) with a
+     * single bright spike elsewhere: the spike is one-off codec-style
+     * flicker and must not capture the weights, and the accumulated
+     * drift must still register as motion so the real 1.6s period is
+     * found.
+     */
+    @Test
+    fun slowSmallRegionWinsOverOneOffSpike() {
+        val frames = (0 until 30).map { k ->
+            val luma = ByteArray(w * h) { 20 }
+            // Triangle wave on two cells, 4 luma units per step (below
+            // the motion gate per step), period 8.
+            val phase = k % 8
+            val v = 60 + (if (phase < 4) phase else 8 - phase) * 4
+            luma[2 * w + 3] = v.toByte()
+            luma[2 * w + 4] = v.toByte()
+            if (k == 7) luma[0] = 200.toByte() // one-off spike
+            LoopFinder.Frame(k * 200L, w, h, luma)
+        }
+        val result = LoopFinder.find(frames)
+        assertTrue("expected the slow oscillation's loop", result.candidates.isNotEmpty())
+        val top = result.candidates.first()
+        assertEquals(1600L, top.endMs - top.startMs)
+        assertTrue("seam ${top.seam} too low", top.seam >= 0.98)
+    }
+
     @Test
     fun staticScreenIsNotALoop() {
         val frames = (0 until 25).map { k -> frameAt(k * 200L, blockCol = 0) }
@@ -75,6 +122,23 @@ class LoopFinderTest {
         }
         val result = LoopFinder.find(frames)
         assertTrue(result.candidates.isEmpty())
+    }
+
+    /**
+     * The blinking cell sits in a masked bar row: it must not count as
+     * activity at all, so the screen reads as static and no loop is
+     * found.
+     */
+    @Test
+    fun maskedBarMotionIsNotActivity() {
+        val frames = (0 until 30).map { k ->
+            val luma = ByteArray(w * h) { 20 }
+            if (k % 2 == 0) luma[5] = 220.toByte()
+            LoopFinder.Frame(k * 200L, w, h, luma, skipTopRows = 1)
+        }
+        val result = LoopFinder.find(frames)
+        assertTrue(result.candidates.isEmpty())
+        assertNull(result.bestEffort)
     }
 
     @Test
@@ -95,7 +159,9 @@ class LoopFinderTest {
             frameAt(
                 k * 200L,
                 blockCol = k % 4,
-                fill = 20 + (k % 7)
+                // Drift scaled above the activity floor so it counts as
+                // real motion: the return poses stay close but never identical.
+                fill = 20 + (k % 7) * 4
             )
         }
         val result = LoopFinder.find(frames, seamThreshold = 0.999)

@@ -27,6 +27,16 @@ package com.vanipy.bidik
  * last frame are identical, so the exported GIF wraps without a jump.
  * Candidates are ranked by seam (higher first), then by shorter span:
  * the tightest single cycle wins over many repeats of it.
+ *
+ * All scores are motion-weighted: cells that never change during the
+ * sampled window play no part in the average (see [activityWeights]).
+ * A whole-grid mean dilutes a small animated region - a widget-sized
+ * animation is a few cells of a 32x18 grid, so its motion and its seam
+ * both vanish under a static screen, and every span scores ~1.0. With
+ * the active cells carrying the weight, a small looping region is
+ * detected with its real period instead of being missed entirely or
+ * matched at an arbitrary span. A static window has no active cells,
+ * no weights, and still yields no loop.
  */
 object LoopFinder {
 
@@ -74,20 +84,104 @@ object LoopFinder {
         return 1.0 - (sum.toDouble() / count) / 255.0
     }
 
-    /** Number of distinct moments the screen changed inside [from, to]. */
-    private fun motionEvents(frames: List<Frame>, from: Int, to: Int, min: Double): Int {
+    /** Smallest per-step luma change that counts as a cell moving. */
+    private const val DENSITY_STEP = 4
+
+    /** Cells moving in fewer steps than this are spikes or codec flicker, not content. */
+    private const val DENSITY_MIN_STEPS = 3
+
+    /**
+     * Per-cell activity over the whole sequence: in how many steps each
+     * cell actually moved (by [DENSITY_STEP] luma units or more), so
+     * slow steady motion accumulates instead of vanishing between
+     * adjacent samples, and one-off spikes - including codec flicker
+     * near video edges - stay below [DENSITY_MIN_STEPS] and get zero
+     * weight. Masked rows get zero weight. Survivors are normalized to
+     * sum to 1. Returns null when nothing moves (a static window has no
+     * loop to find). Uniform density reduces weighted scores to the
+     * plain mean.
+     */
+    fun activityWeights(frames: List<Frame>): DoubleArray? {
+        if (frames.size < 2) return null
+        val first = frames[0]
+        val top = first.skipTopRows
+        val bottom = first.gridH - first.skipBottomRows
+        if (bottom <= top) return null
+        val density = IntArray(first.luma.size)
+        for (k in 0 until frames.size - 1) {
+            val a = frames[k]
+            val b = frames[k + 1]
+            for (row in top until bottom) {
+                val base = row * first.gridW
+                for (col in 0 until first.gridW) {
+                    val i = base + col
+                    if (kotlin.math.abs(
+                            (a.luma[i].toInt() and 0xFF) - (b.luma[i].toInt() and 0xFF)
+                        ) >= DENSITY_STEP
+                    ) {
+                        density[i]++
+                    }
+                }
+            }
+        }
+        val act = DoubleArray(first.luma.size)
+        var total = 0.0
+        for (i in act.indices) {
+            if (density[i] >= DENSITY_MIN_STEPS) {
+                act[i] = density[i].toDouble()
+                total += act[i]
+            }
+        }
+        if (total <= 0.0) return null
+        for (i in act.indices) act[i] /= total
+        return act
+    }
+
+    /** Similarity where only the active cells count (see [activityWeights]). */
+    fun similarity(a: Frame, b: Frame, weights: DoubleArray): Double {
+        require(a.gridW == b.gridW && a.gridH == b.gridH)
+        val top = maxOf(a.skipTopRows, b.skipTopRows)
+        val bottom = minOf(a.gridH - a.skipBottomRows, b.gridH - b.skipBottomRows)
+        if (bottom <= top) return 0.0
+        var sum = 0.0
+        for (row in top until bottom) {
+            val base = row * a.gridW
+            for (col in 0 until a.gridW) {
+                val i = base + col
+                sum += weights[i] * kotlin.math.abs(
+                    (a.luma[i].toInt() and 0xFF) - (b.luma[i].toInt() and 0xFF)
+                )
+            }
+        }
+        return 1.0 - sum / 255.0
+    }
+
+    /**
+     * Number of distinct moments the screen changed inside [from, to].
+     * Change accumulates from the last event, so slow motion counts at
+     * the same total as fast motion: a region drifting below the
+     * threshold per step still registers once the accumulated drift
+     * crosses it.
+     */
+    private fun motionEvents(
+        frames: List<Frame>, from: Int, to: Int, min: Double, weights: DoubleArray
+    ): Int {
         var events = 0
-        for (k in from until to) {
-            if (1.0 - similarity(frames[k], frames[k + 1]) >= min) events++
+        var last = from
+        for (k in from + 1..to) {
+            if (1.0 - similarity(frames[last], frames[k], weights) >= min) {
+                events++
+                last = k
+            }
         }
         return events
     }
 
     /** Largest dissimilarity between the start frame and any interior frame. */
-    private fun departure(frames: List<Frame>, from: Int, to: Int): Double {
+    private fun departure(frames: List<Frame>, from: Int, to: Int, weights: DoubleArray): Double {
         var worst = 0.0
         for (k in from + 1 until to) {
-            val d = 1.0 - similarity(frames[from], frames[k])
+            val d = 1.0 - similarity(frames[from], frames[k], weights)
             if (d > worst) worst = d
         }
         return worst
@@ -98,8 +192,26 @@ object LoopFinder {
      * back: it departs from the start frame and changes at least twice
      * (once away, once back). One-time changes fail this.
      */
-    private fun hasCycleMotion(frames: List<Frame>, from: Int, to: Int, min: Double): Boolean {
-        return departure(frames, from, to) >= min && motionEvents(frames, from, to, min) >= 2
+    private fun hasCycleMotion(
+        frames: List<Frame>, from: Int, to: Int, min: Double, weights: DoubleArray
+    ): Boolean {
+        return departure(frames, from, to, weights) >= min &&
+            motionEvents(frames, from, to, min, weights) >= 2
+    }
+
+    /**
+     * A loop's endpoints must match far better than the journey inside:
+     * when the seam error is comparable to the deepest departure, the
+     * span is a one-way trend (a drift, a scroll), not a return. Slow
+     * drifts pass the absolute seam threshold on tolerance alone, so
+     * the seam error is capped relative to the departure.
+     */
+    private fun returnsToStart(
+        frames: List<Frame>, from: Int, to: Int, weights: DoubleArray, seam: Double
+    ): Boolean {
+        val dep = departure(frames, from, to, weights)
+        if (dep <= 0.0) return false
+        return (1.0 - seam) <= 0.25 * dep
     }
 
     fun find(
@@ -111,7 +223,10 @@ object LoopFinder {
         maxCandidates: Int = 3
     ): Result {
         if (frames.size < 3) return Result(emptyList(), null)
+        // No motion anywhere means no loop, whatever the seams say.
+        val weights = activityWeights(frames) ?: return Result(emptyList(), null)
         val found = ArrayList<Candidate>()
+        val foundDeparture = ArrayList<Double>()
         var best: Candidate? = null
         for (i in 0 until frames.size - 1) {
             val t0 = frames[i].timeMs
@@ -119,7 +234,7 @@ object LoopFinder {
             while (j < frames.size && frames[j].timeMs - t0 <= maxLoopMs) {
                 val span = frames[j].timeMs - t0
                 if (span >= minLoopMs) {
-                    val seam = similarity(frames[i], frames[j])
+                    val seam = similarity(frames[i], frames[j], weights)
                     val current = best
                     if (current == null || seam > current.seam ||
                         (seam == current.seam && span < current.endMs - current.startMs)
@@ -127,17 +242,29 @@ object LoopFinder {
                         best = Candidate(t0, frames[j].timeMs, seam)
                     }
                     if (seam >= seamThreshold &&
-                        hasCycleMotion(frames, i, j, motionMin)
+                        hasCycleMotion(frames, i, j, motionMin, weights) &&
+                        returnsToStart(frames, i, j, weights, seam)
                     ) {
                         found.add(Candidate(t0, frames[j].timeMs, seam))
+                        foundDeparture.add(departure(frames, i, j, weights))
                     }
                 }
                 j++
             }
         }
-        found.sortWith(compareByDescending<Candidate> { it.seam }.thenBy { it.endMs - it.startMs })
+        // Among full matches, prefer spans that cover (nearly) the
+        // whole journey: a half-cycle mirrored pair also matches
+        // seamlessly, but a loop trimmed to it plays back only part of
+        // the motion. The tightest span reaching 80% of the deepest
+        // departure wins, then the higher seam.
+        val maxDeparture = foundDeparture.maxOrNull() ?: 0.0
+        val eligible = ArrayList<Candidate>()
+        for (idx in found.indices) {
+            if (foundDeparture[idx] >= 0.8 * maxDeparture) eligible.add(found[idx])
+        }
+        eligible.sortWith(compareByDescending<Candidate> { it.seam }.thenBy { it.endMs - it.startMs })
         val picked = ArrayList<Candidate>()
-        for (c in found) {
+        for (c in eligible) {
             if (picked.size >= maxCandidates) break
             if (picked.none { overlaps(it, c) }) picked.add(c)
         }
@@ -147,7 +274,8 @@ object LoopFinder {
                 frames,
                 indexOfTime(frames, best.startMs),
                 indexOfTime(frames, best.endMs),
-                motionMin
+                motionMin,
+                weights
             )
         ) {
             best
