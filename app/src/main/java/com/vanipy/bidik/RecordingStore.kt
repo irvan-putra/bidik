@@ -72,6 +72,20 @@ object RecordingStore {
         return candidate
     }
 
+    /**
+     * Deletes a saved recording by file name. Only files directly
+     * inside the recordings directory can go, and the file an active
+     * recording session is writing is never touched. Returns true when
+     * a file was actually removed.
+     */
+    fun delete(context: Context, fileName: String): Boolean {
+        val dir = dir(context).canonicalFile
+        val target = File(dir, fileName).canonicalFile
+        if (target.parentFile != dir) return false
+        if (activeName(context) == fileName) return false
+        return target.delete()
+    }
+
     fun setActive(context: Context, fileName: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_ACTIVE, fileName).apply()

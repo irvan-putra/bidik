@@ -120,10 +120,44 @@ class MainActivityRenderTest {
         val root = activity.window.decorView
         assertTrue("GIF action missing on a saved mp4 row", findButton(root, "GIF"))
         assertTrue("Share action missing on a saved mp4 row", findButton(root, "Share"))
+        assertTrue("View action missing on a saved mp4 row", findButton(root, "View"))
+        assertTrue("Delete action missing on a saved mp4 row", findButton(root, "Delete"))
+        mp4.delete()
+    }
+
+    @Test
+    fun deleteAsksFirstAndOnlyThenRemovesTheFile() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val dir = RecordingStore.dir(app)
+        dir.mkdirs()
+        val mp4 = File(dir, "bidik-20261119-091500.mp4")
+        mp4.writeBytes(ByteArray(1024) { it.toByte() })
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        Thread.sleep(1500)
+        assertTrue("Delete action missing", clickButton(activity.window.decorView, "Delete"))
+        val dialog = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog()
+        assertTrue("delete must ask for confirmation first", dialog != null)
+        assertTrue("file must survive opening the dialog", mp4.exists())
+        dialog!!.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
+        assertTrue("confirmed delete must remove the file", !mp4.exists())
         mp4.delete()
     }
 
     companion object {
+        fun clickButton(v: View, label: String): Boolean {
+            if (v is android.widget.Button && v.text.toString() == label) {
+                v.performClick()
+                return true
+            }
+            if (v is android.view.ViewGroup) {
+                for (i in 0 until v.childCount) {
+                    if (clickButton(v.getChildAt(i), label)) return true
+                }
+            }
+            return false
+        }
+
         fun findButton(v: View, label: String): Boolean {
             if (v is android.widget.Button && v.text.toString() == label) return true
             if (v is android.view.ViewGroup) {

@@ -437,8 +437,16 @@ class MainActivity : AppCompatActivity() {
                     })
                 }
                 row.addView(Button(this).apply {
+                    text = "View"
+                    setOnClickListener { previewRecording(file) }
+                })
+                row.addView(Button(this).apply {
                     text = "Share"
                     setOnClickListener { shareRecording(file) }
+                })
+                row.addView(Button(this).apply {
+                    text = "Delete"
+                    setOnClickListener { confirmDeleteRecording(file) }
                 })
                 recordingsBox.addView(row)
             }
@@ -456,6 +464,42 @@ class MainActivity : AppCompatActivity() {
         }
         startActivity(android.content.Intent.createChooser(intent, "Share recording"))
         DiagLog.log(this, "record", "shared")
+    }
+
+    /**
+     * Opens a recording in whatever viewer the phone has, so it can be
+     * checked before anything is shared. Local playback only; the file
+     * never leaves the phone for this.
+     */
+    internal fun previewRecording(file: File) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this, "com.vanipy.bidik.fileprovider", file
+        )
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, if (file.extension == "gif") "image/gif" else "video/mp4")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(android.content.Intent.createChooser(intent, "View recording"))
+        DiagLog.log(this, "record", "previewed")
+    }
+
+    /**
+     * Saved recordings only leave the list by an explicit delete, and
+     * the delete always asks first. The file is removed from the phone;
+     * there is no undo.
+     */
+    internal fun confirmDeleteRecording(file: File) {
+        AlertDialog.Builder(this)
+            .setTitle("delete ${file.name}?")
+            .setMessage("this removes the file from the phone. this cannot be undone.")
+            .setPositiveButton("Delete") { _, _ ->
+                if (RecordingStore.delete(this, file.name)) {
+                    DiagLog.log(this, "record", "deleted", detail = file.name)
+                }
+                renderRecordSection()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     /**
