@@ -40,6 +40,8 @@ object DiagLog {
             Regex("stage=(?:queue|capture)"),
             Regex("ok=\\d+ failed=\\d+"),
             Regex("code=-?\\d+"),
+            Regex("delay=\\d+ autostop=\\d+ bars=(?:shown|hidden)"),
+            Regex("frames=\\d+"),
         )
         return if (allowed.any { it.matches(detail) } || detail == "already in progress") {
             detail

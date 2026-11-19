@@ -52,7 +52,60 @@ class MainActivityRenderTest {
         FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         assertTrue("render missing: $out", out.exists() && out.length() > 5_000)
 
-        // The Diagnostics entry point must be reachable in every state.
+        assertTrue("Record screen button must be present", findButton(root, "Record screen"))
+        assertTrue("Run capture button must be present", findButton(root, "Run capture"))
+        assertTrue("Menu button must be present", findButton(root, "Menu"))
+        // The drawer is part of the hierarchy even while closed.
+        assertTrue("Diagnostics must stay reachable in the menu", findButton(root, "Diagnostics"))
+        // Fresh install: the path into messaging setup must be visible
+        // on the main screen without opening the menu first.
+        assertTrue(
+            "setup hint must be visible while unpaired",
+            findButton(root, "Set up messaging sync (in the menu)")
+        )
+        // The menu must start closed: home screen is the everyday view.
+        assertTrue(
+            "menu must start closed",
+            !activity.drawer.isDrawerOpen(androidx.core.view.GravityCompat.START)
+        )
+    }
+
+    @Test
+    fun menuOpensToSetupAndDiagnostics() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        Thread.sleep(1500)
+        val root = activity.window.decorView
+        val w = 1080 / 2
+        val h = 2400 / 2
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
+        )
+        root.layout(0, 0, w, h)
+        // DrawerLayout tracks open state only after a layout pass, and
+        // Robolectric never ticks the drag animation, so open without
+        // animating.
+        activity.drawer.openDrawer(androidx.core.view.GravityCompat.START, false)
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
+        )
+        root.layout(0, 0, w, h)
+        assertTrue(
+            "menu did not open",
+            activity.drawer.isDrawerOpen(androidx.core.view.GravityCompat.START)
+        )
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(android.graphics.Color.WHITE)
+        root.draw(Canvas(bmp))
+        val out = File("/tmp/bidik-menu-open.png")
+        FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertTrue("render missing: $out", out.exists() && out.length() > 5_000)
+        assertTrue("Diagnostics must be in the menu", findButton(root, "Diagnostics"))
+    }
+
+    companion object {
         fun findButton(v: View, label: String): Boolean {
             if (v is android.widget.Button && v.text.toString() == label) return true
             if (v is android.view.ViewGroup) {
@@ -62,8 +115,6 @@ class MainActivityRenderTest {
             }
             return false
         }
-        assertTrue("Diagnostics button must be present", findButton(root, "Diagnostics"))
-        assertTrue("Record screen button must be present", findButton(root, "Record screen"))
     }
 
     @Test
@@ -95,7 +146,7 @@ class MainActivityRenderTest {
         assertTrue(
             "last setup row should be the retention note",
             last is android.widget.TextView &&
-                (last as android.widget.TextView).text.contains("archived per run")
+                last.text.contains("archived per run")
         )
         box.layout(0, 0, w, h)
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)

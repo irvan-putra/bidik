@@ -52,6 +52,26 @@ object RecordingStore {
             ?.sortedByDescending { it.lastModified() }
             ?: emptyList()
 
+    /** Everything the user can share: recordings and exported GIFs. */
+    fun listSharable(context: Context): List<File> =
+        dir(context).listFiles { f -> f.isFile && (f.extension == "mp4" || f.extension == "gif") }
+            ?.sortedByDescending { it.lastModified() }
+            ?: emptyList()
+
+    /** Fresh, non-colliding GIF file for a new export. */
+    fun newGifFile(context: Context, now: Date = Date()): File {
+        val dir = dir(context)
+        dir.mkdirs()
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(now)
+        var candidate = File(dir, "bidik-$stamp.gif")
+        var suffix = 1
+        while (candidate.exists()) {
+            candidate = File(dir, "bidik-$stamp-$suffix.gif")
+            suffix++
+        }
+        return candidate
+    }
+
     fun setActive(context: Context, fileName: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_ACTIVE, fileName).apply()

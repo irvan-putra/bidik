@@ -45,11 +45,27 @@ import java.util.concurrent.atomic.AtomicBoolean
  * startFeeding and stop marshal onto it and block briefly for the
  * caller.
  */
+/**
+ * [cropTopPx] / [cropBottomPx] remove a band from the top and bottom of
+ * every encoded frame (used to leave the status bar and navigation bar
+ * out of the video). The virtual display still renders the full screen;
+ * the draw step samples only the middle band, and the encoder is
+ * configured at the cropped height, so no re-encode pass is needed and
+ * the phone's own screen is untouched.
+ */
 internal class CaptureEngine(
     private val width: Int,
     private val height: Int,
-    private val outFile: File
+    private val outFile: File,
+    private val cropTopPx: Int = 0,
+    private val cropBottomPx: Int = 0
 ) {
+    private val encodeHeight = height - cropTopPx - cropBottomPx
+
+    init {
+        require(cropTopPx >= 0 && cropBottomPx >= 0) { "negative crop" }
+        require(encodeHeight >= 16) { "crop leaves no frame" }
+    }
     private val thread = HandlerThread("bidik-capture")
     private lateinit var handler: Handler
     private val frameAvailable = AtomicBoolean(false)
@@ -129,7 +145,7 @@ internal class CaptureEngine(
     private fun setup() {
         muxer = MediaMuxer(outFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
-        val format = MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
+        val format = MediaFormat.createVideoFormat(MIME_TYPE, width, encodeHeight).apply {
             setInteger(
                 MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
@@ -170,6 +186,7 @@ internal class CaptureEngine(
     /** Renders the current texture to the encoder with a wall-clock PTS. */
     private fun drawNow() {
         if (!haveTexture) return
+        applyCrop()
         GLES20.glUseProgram(program)
         GLES20.glUniformMatrix4fv(uTexMatrix, 1, false, texMatrix, 0)
         GLES20.glEnableVertexAttribArray(aPos)
@@ -184,6 +201,30 @@ internal class CaptureEngine(
         if (startNanos < 0) startNanos = now
         EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, now - startNanos)
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+    }
+
+    /**
+     * Restricts the sampled texture band to the uncropped rows. The
+     * transform matrix already carries any vertical flip, so the crop
+     * is computed in raw texture space (row 0 = top of the captured
+     * image) and mapped back through the matrix: bottom quad vertices
+     * get the coord for raw row (height - cropBottomPx), top vertices
+     * the coord for raw row cropTopPx.
+     */
+    private fun applyCrop() {
+        if (cropTopPx == 0 && cropBottomPx == 0) return
+        val a = texMatrix[5]
+        val b = texMatrix[13]
+        if (a == 0f) return
+        val s0 = cropTopPx.toFloat() / height
+        val s1 = 1f - cropBottomPx.toFloat() / height
+        val tBottom = (s1 - b) / a
+        val tTop = (s0 - b) / a
+        val floats = texBuffer.asFloatBuffer()
+        floats.put(1, tBottom)
+        floats.put(3, tBottom)
+        floats.put(5, tTop)
+        floats.put(7, tTop)
     }
 
     private fun stopOnThread(save: Boolean): Boolean {
@@ -325,7 +366,7 @@ internal class CaptureEngine(
         check(EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
             "eglMakeCurrent failed"
         }
-        GLES20.glViewport(0, 0, width, height)
+        GLES20.glViewport(0, 0, width, encodeHeight)
 
         program = buildProgram()
         aPos = GLES20.glGetAttribLocation(program, "aPos")

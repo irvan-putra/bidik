@@ -46,9 +46,20 @@ import java.io.File
  * in-progress file therefore never appears in the app's recordings list
  * and can never be shared unfinished. Files stay on the phone (see
  * RecordingStore). Stop paths: the notification Stop action, the app's
- * stop button, the projection ending from the system side, or the
- * MAX_DURATION_MS cap. A failed or empty recording deletes its partial
- * file.
+ * stop button, the projection ending from the system side, a chosen
+ * auto-stop duration, or the MAX_DURATION_MS cap. A failed or empty
+ * recording deletes its partial file.
+ *
+ * Recording options (RecordOptions): a start delay runs between consent
+ * and the first encoded frame - the projection and virtual display are
+ * set up immediately (the consent token backs exactly one virtual
+ * display), only the encoder feeding waits - so the user can switch to
+ * the screen to share first; the countdown shows in the notification
+ * and stopping during it cancels without saving. An auto-stop duration
+ * saves the recording with no interaction, so neither end of the clip
+ * needs the app's UI on screen. The system-bars option crops those
+ * bands in the encoder (see CaptureEngine), it never hides anything on
+ * the phone.
  */
 class ScreenRecordService : Service() {
 
@@ -60,9 +71,12 @@ class ScreenRecordService : Service() {
         const val EXTRA_RESULT_DATA = "resultData"
         const val EXTRA_STATE = "state"
         const val EXTRA_FILE = "file"
+        const val EXTRA_REMAINING_SEC = "remainingSec"
+        const val STATE_STARTING = "starting"
         const val STATE_RECORDING = "recording"
         const val STATE_SAVED = "saved"
         const val STATE_FAILED = "failed"
+        const val STATE_CANCELED = "canceled"
         private const val CHANNEL_ID = "screen-recording"
         private const val NOTIFICATION_ID = 7
 
@@ -79,6 +93,8 @@ class ScreenRecordService : Service() {
     private var partialFile: File? = null
     private var started = false
     private var cleanedUp = false
+    private var autoStopSec = 0
+    private var delaySec = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -86,7 +102,10 @@ class ScreenRecordService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 // A stop request with nothing running is not a failure.
-                if (active) cleanup(save = true, failed = false) else stopSelf()
+                // During the start-delay countdown a stop cancels the
+                // session instead of saving an empty clip.
+                if (active) cleanup(save = started, failed = false, canceled = !started)
+                else stopSelf()
             }
             ACTION_START -> {
                 if (active) {
@@ -120,6 +139,8 @@ class ScreenRecordService : Service() {
             stopSelf()
             return
         }
+        delaySec = RecordOptions.delaySeconds(this)
+        autoStopSec = RecordOptions.autoStopSeconds(this)
         startForegroundWithNotification()
         val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val mp = try {
@@ -151,7 +172,17 @@ class ScreenRecordService : Service() {
         // actions only ever see finished files.
         val partial = File(cacheDir, file.name + ".part")
         partial.delete()
-        val eng = CaptureEngine(width, height, partial)
+        val bands = if (RecordOptions.barsHidden(this)) {
+            SystemBars.bands(this)
+        } else {
+            SystemBars.Bands(0, 0)
+        }
+        val eng = try {
+            CaptureEngine(width, height, partial, bands.topPx, bands.bottomPx)
+        } catch (e: Exception) {
+            cleanup(save = false, failed = true, error = e)
+            return
+        }
         // Track all three before any failing call so cleanup releases
         // the engine and deletes the partial file on every failure path.
         engine = eng
@@ -174,6 +205,36 @@ class ScreenRecordService : Service() {
             return
         }
         virtualDisplay = vd
+        // The session is live from here: the stop control appears and a
+        // second start is refused. The encoder feed itself may still wait
+        // out the start delay.
+        active = true
+        RecordingStore.setActive(this, file.name)
+        if (delaySec > 0) {
+            runCountdown(eng, delaySec)
+        } else {
+            beginFeeding(eng)
+        }
+    }
+
+    /**
+     * Counts down the start delay, one notification update per second,
+     * then starts the encoder feed. The projection and virtual display
+     * already exist; nothing is encoded until the countdown ends.
+     */
+    private fun runCountdown(eng: CaptureEngine, secondsLeft: Int) {
+        if (cleanedUp) return
+        if (secondsLeft <= 0) {
+            beginFeeding(eng)
+            return
+        }
+        updateNotification("starting in ${secondsLeft}s - switch to the screen to record", "Cancel")
+        broadcastStatus(STATE_STARTING, null, secondsLeft)
+        handler.postDelayed({ runCountdown(eng, secondsLeft - 1) }, 1_000L)
+    }
+
+    private fun beginFeeding(eng: CaptureEngine) {
+        if (cleanedUp) return
         try {
             eng.startFeeding()
         } catch (e: Exception) {
@@ -181,16 +242,26 @@ class ScreenRecordService : Service() {
             return
         }
         started = true
-        active = true
-        RecordingStore.setActive(this, file.name)
-        handler.postDelayed({ cleanup(save = true, failed = false) },
-            RecordingStore.MAX_DURATION_MS)
-        DiagLog.log(this, "record", "start")
+        updateNotification("Local only. Stop from here or from the app.", "Stop")
+        val capMs = if (autoStopSec > 0) {
+            autoStopSec * 1_000L
+        } else {
+            RecordingStore.MAX_DURATION_MS
+        }
+        handler.postDelayed({ cleanup(save = true, failed = false) }, capMs)
+        val bars = if (RecordOptions.barsHidden(this)) "hidden" else "shown"
+        DiagLog.log(this, "record", "start",
+            detail = "delay=$delaySec autostop=$autoStopSec bars=$bars")
         broadcastStatus(STATE_RECORDING, null)
     }
 
     @Synchronized
-    private fun cleanup(save: Boolean, failed: Boolean, error: Throwable? = null) {
+    private fun cleanup(
+        save: Boolean,
+        failed: Boolean,
+        error: Throwable? = null,
+        canceled: Boolean = false
+    ) {
         if (cleanedUp) return
         cleanedUp = true
         handler.removeCallbacksAndMessages(null)
@@ -229,9 +300,15 @@ class ScreenRecordService : Service() {
                 partial?.delete()
             } catch (_: Exception) {
             }
-            val category = if (error != null) DiagLog.errorCategory(error) else "operation_failed"
-            DiagLog.log(this, "record", "failed", detail = "category=$category")
-            broadcastStatus(STATE_FAILED, null)
+            if (canceled) {
+                DiagLog.log(this, "record", "canceled")
+                broadcastStatus(STATE_CANCELED, null)
+            } else {
+                val category =
+                    if (error != null) DiagLog.errorCategory(error) else "operation_failed"
+                DiagLog.log(this, "record", "failed", detail = "category=$category")
+                broadcastStatus(STATE_FAILED, null)
+            }
         }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -249,13 +326,7 @@ class ScreenRecordService : Service() {
         }
     }
 
-    private fun startForegroundWithNotification() {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID, "Screen recording", NotificationManager.IMPORTANCE_LOW
-            )
-        )
+    private fun buildNotification(text: String, actionLabel: String): Notification {
         val openApp = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
@@ -266,25 +337,42 @@ class ScreenRecordService : Service() {
             Intent(this, ScreenRecordService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val notification: Notification = Notification.Builder(this, CHANNEL_ID)
+        return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setContentTitle("bidik is recording the screen")
-            .setContentText("Local only. Stop from here or from the app.")
+            .setContentText(text)
             .setContentIntent(openApp)
-            .addAction(Notification.Action.Builder(null, "Stop", stop).build())
+            .addAction(Notification.Action.Builder(null, actionLabel, stop).build())
             .setOngoing(true)
             .build()
+    }
+
+    private fun startForegroundWithNotification() {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID, "Screen recording", NotificationManager.IMPORTANCE_LOW
+            )
+        )
         ServiceCompat.startForeground(
-            this, NOTIFICATION_ID, notification,
+            this, NOTIFICATION_ID,
+            buildNotification("Local only. Stop from here or from the app.", "Stop"),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         )
     }
 
-    private fun broadcastStatus(state: String, fileName: String?) {
+    /** Swaps the foreground notification text/action (countdown vs recording). */
+    private fun updateNotification(text: String, actionLabel: String) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIFICATION_ID, buildNotification(text, actionLabel))
+    }
+
+    private fun broadcastStatus(state: String, fileName: String?, remainingSec: Int = -1) {
         val intent = Intent(ACTION_STATUS)
             .setPackage(packageName)
             .putExtra(EXTRA_STATE, state)
         if (fileName != null) intent.putExtra(EXTRA_FILE, fileName)
+        if (remainingSec >= 0) intent.putExtra(EXTRA_REMAINING_SEC, remainingSec)
         sendBroadcast(intent)
     }
 

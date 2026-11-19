@@ -1,10 +1,13 @@
 package com.vanipy.bidik
 
 import android.app.Instrumentation
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
+import android.os.Build
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -76,6 +79,12 @@ class ScreenRecordTest {
         device.waitForIdle(5_000)
         RecordingStore.dir(context).listFiles()?.forEach { it.delete() }
         RecordingStore.clearActive(context)
+        // Each test opts into the recording options it exercises; the
+        // baseline tests keep the original immediate, manual-stop,
+        // full-screen behavior.
+        RecordOptions.setDelaySeconds(context, 0)
+        RecordOptions.setAutoStopSeconds(context, 0)
+        RecordOptions.setBarsHidden(context, false)
     }
 
     @After
@@ -151,6 +160,319 @@ class ScreenRecordTest {
         assertPlayableVideo(recording, frameUs = 5_000_000, what = "static tail")
 
         copyEvidence(recording, "static-tail-frame.png", frameUs = 5_000_000)
+    }
+
+    /**
+     * A 4s start delay must leave those 4s out of the clip: the
+     * broadcast state stays "starting" during the countdown, and the
+     * saved video's duration tracks only the time after it.
+     */
+    @Test
+    fun delayedStartTrimsClipStart() {
+        RecordOptions.setDelaySeconds(context, 5)
+        val states = recordStatusStates()
+        launchMain()
+        clickAppButton("Record screen")
+        clickFirstSystemOption(10_000, "Entire screen")
+        val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
+        assertTrue("consent dialog never appeared: " + windowDump(), accepted)
+
+        Thread.sleep(1_500)
+        synchronized(states) {
+            assertTrue("expected the countdown state 1.5s after consent, got $states",
+                states.isNotEmpty() && states.last() == ScreenRecordService.STATE_STARTING)
+        }
+        assertTrue("recording must begin after the 5s delay: $states",
+            waitForState(states, ScreenRecordService.STATE_RECORDING, 10_000))
+
+        // Record ~3s past the delay, then stop from the app.
+        Thread.sleep(3_000)
+        waitForStopControl().click()
+
+        val recording = waitForRecording(30_000)
+        assertNotNull("no saved recording after delayed start", recording)
+        // Wall time consent-to-stop was ~8s; only the ~3s after the
+        // countdown belong in the file.
+        assertElapsed(recording!!, minimumMs = 2_200, maximumMs = 6_000, what = "delayed")
+        assertTrue("status sequence must run starting->recording->saved: $states",
+            waitForState(states, ScreenRecordService.STATE_SAVED, 10_000))
+        copyEvidence(recording, "delayed-frame.png", frameUs = 1_500_000)
+    }
+
+    /**
+     * With an auto-stop duration the recording saves itself: no stop
+     * tap, no return to the app, so the tail of the clip shows the
+     * target screen rather than the trip back.
+     */
+    @Test
+    fun autoStopSavesWithoutInteraction() {
+        RecordOptions.setDelaySeconds(context, 0)
+        RecordOptions.setAutoStopSeconds(context, 5)
+        launchMain()
+        clickAppButton("Record screen")
+        clickFirstSystemOption(10_000, "Entire screen")
+        val accepted = clickFirstSystemOption(30_000, "Share screen", "Start now", "START NOW")
+        assertTrue("consent dialog never appeared: " + windowDump(), accepted)
+
+        // No further interaction: the session must end and save alone.
+        val recording = waitForRecording(30_000)
+        assertNotNull("auto-stop never saved the recording", recording)
+        assertPlayableVideo(recording!!, frameUs = 1_000_000, what = "auto-stop")
+        assertElapsed(recording, minimumMs = 4_000, maximumMs = 12_000, what = "auto-stop")
+        copyEvidence(recording, "autostop-frame.png", frameUs = 2_000_000)
+    }
+
+    /**
+     * The hidden-bars option crops the status and navigation bars in the
+     * encoder: the saved video is shorter by exactly the two bands, and
+     * its pixels match the middle band of a full-screen recording.
+     */
+    @Test
+    fun hiddenBarsCropTheVideo() {
+        val bands = SystemBars.bands(context)
+        assertTrue("emulator must report a status bar", bands.topPx > 0)
+
+        // Reference: full-screen recording of the untouched UI.
+        startConsentedRecording()
+        waitForStopControl()
+        Thread.sleep(4_000)
+        waitForStopControl().click()
+        val full = waitForRecording(30_000)
+        assertNotNull(full)
+        val fullDims = videoDims(full!!)
+
+        RecordingStore.dir(context).listFiles()?.forEach { it.delete() }
+        RecordOptions.setBarsHidden(context, true)
+        scenario?.close()
+        startConsentedRecording()
+        waitForStopControl()
+        Thread.sleep(4_000)
+        waitForStopControl().click()
+        val cropped = waitForRecording(30_000)
+        assertNotNull(cropped)
+        val croppedDims = videoDims(cropped!!)
+
+        assertEquals(fullDims.first, croppedDims.first)
+        assertEquals(
+            "cropped height must drop exactly the two bar bands",
+            fullDims.second - bands.topPx - bands.bottomPx, croppedDims.second
+        )
+
+        // Pixel proof: the cropped frame is the middle band of the full
+        // frame, not the top of it (which holds the status bar).
+        val fullFrame = frameAt(full, 1_500_000)
+        val croppedFrame = frameAt(cropped, 1_500_000)
+        assertNotNull(fullFrame)
+        assertNotNull(croppedFrame)
+        val mad = bandDifference(fullFrame!!, bands.topPx, croppedFrame!!)
+        assertTrue("cropped frame differs from the matching full-frame band (mad=$mad)", mad < 25.0)
+
+        copyEvidence(cropped, "cropped-bars-frame.png", frameUs = 1_500_000)
+    }
+
+    /**
+     * End to end for the GIF path: record a periodically changing
+     * screen, let the loop search find the cycle, export its span, and
+     * verify the GIF's marker, frame count, size and decodability.
+     */
+    @Test
+    fun loopFoundAndGifExported() {
+        startConsentedRecording()
+        waitForStopControl()
+
+        // Flip a full-width band black/white every 400ms: an 800ms cycle
+        // of real on-screen motion for the loop search to find.
+        val deadline = System.currentTimeMillis() + 6_400
+        var dark = false
+        while (System.currentTimeMillis() < deadline) {
+            dark = !dark
+            val color = if (dark) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+            scenario!!.onActivity {
+                it.window.decorView.setBackgroundColor(color)
+                it.status.setBackgroundColor(color)
+            }
+            Thread.sleep(400)
+        }
+        waitForStopControl().click()
+        val recording = waitForRecording(30_000)
+        assertNotNull(recording)
+
+        val result = LoopAnalyzer.analyze(recording!!)
+        assertTrue("no loop candidate in a periodic recording", result.candidates.isNotEmpty())
+        val top = result.candidates.first()
+        assertTrue("seam ${top.seam} too low for the periodic screen", top.seam >= 0.95)
+        assertTrue(
+            "loop span ${top.startMs}-${top.endMs} is not the ~800ms cycle",
+            top.endMs - top.startMs in 500..1_500
+        )
+
+        val gif = java.io.File(context.cacheDir, "loop-test.gif")
+        gif.delete()
+        val outcome = GifExporter.export(recording, top.startMs, top.endMs, gif)
+        assertTrue("GIF too small to be real: ${outcome.bytes}", outcome.bytes > 2_000)
+        assertTrue("GIF wider than the cap", outcome.width <= GifExporter.DEFAULT_MAX_WIDTH)
+        assertTrue(
+            "frame count ${outcome.frames} far from span*fps",
+            outcome.frames in 4..20
+        )
+        val bytes = gif.readBytes()
+        assertEquals("GIF89a", String(bytes, 0, 6))
+        assertTrue(
+            "missing the infinite-loop marker",
+            String(bytes, Charsets.ISO_8859_1).contains("NETSCAPE2.0")
+        )
+        val decoded = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        assertNotNull("GIF does not decode on Android", decoded)
+        assertEquals(outcome.width, decoded!!.width)
+        assertEquals(outcome.height, decoded.height)
+        gif.copyTo(java.io.File(evidenceDir(), gif.name), overwrite = true)
+
+        // Seam evidence at full resolution: the source frames at the
+        // loop endpoints must be (nearly) the same picture, or the GIF
+        // visibly jumps at the wrap. Saved as PNGs for eyeballing.
+        val seamA = frameAt(recording, top.startMs * 1000L)
+        val seamB = frameAt(recording, top.endMs * 1000L)
+        assertNotNull("no frame at loop start", seamA)
+        assertNotNull("no frame at loop end", seamB)
+        val mad = meanAbsDiff(seamA!!, seamB!!)
+        assertTrue("loop endpoints differ on screen (MAD $mad)", mad <= 12.0)
+        saveEvidenceBitmap("loop-seam-start.png", seamA)
+        saveEvidenceBitmap("loop-seam-end.png", seamB)
+    }
+
+    @Test
+    fun noLoopInNonRepeatingRecording() {
+        startConsentedRecording()
+        waitForStopControl()
+
+        // Six distinct full-screen colors, shown once each: real motion,
+        // but the screen never returns to an earlier state, so a clean
+        // loop must NOT be reported. bestEffort (below the seam bar) is
+        // allowed; a confident candidate is not.
+        val colors = intArrayOf(
+            0xFF2020C0.toInt(), 0xFF20C020.toInt(), 0xFFC02020.toInt(),
+            0xFF20C0C0.toInt(), 0xFFC020C0.toInt(), 0xFFC0C020.toInt()
+        )
+        for (color in colors) {
+            scenario!!.onActivity {
+                it.window.decorView.setBackgroundColor(color)
+                it.status.setBackgroundColor(color)
+            }
+            Thread.sleep(400)
+        }
+        waitForStopControl().click()
+        val recording = waitForRecording(30_000)
+        assertNotNull(recording)
+
+        val result = LoopAnalyzer.analyze(recording!!)
+        assertTrue(
+            "confident loop reported for a screen that never repeats: ${result.candidates}",
+            result.candidates.isEmpty()
+        )
+        val guess = result.bestEffort
+        assertTrue(
+            "best-effort guess seam ${guess?.seam} at or above the confident bar",
+            guess == null || guess.seam < 0.90
+        )
+    }
+
+    private fun recordStatusStates(): MutableList<String> {
+        val states = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val filter = IntentFilter(ScreenRecordService.ACTION_STATUS)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                i.getStringExtra(ScreenRecordService.EXTRA_STATE)?.let { states.add(it) }
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            context.registerReceiver(receiver, filter)
+        }
+        return states
+    }
+
+    private fun waitForState(
+        states: MutableList<String>, wanted: String, timeoutMs: Long
+    ): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            synchronized(states) {
+                if (states.contains(wanted)) return true
+            }
+            Thread.sleep(200)
+        }
+        return false
+    }
+
+    private fun videoDims(file: File): Pair<Int, Int> {
+        val retriever = MediaMetadataRetriever()
+        retriever.setDataSource(file.absolutePath)
+        val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)!!.toInt()
+        val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)!!.toInt()
+        retriever.release()
+        return w to h
+    }
+
+    private fun frameAt(file: File, frameUs: Long): Bitmap? {
+        val retriever = MediaMetadataRetriever()
+        retriever.setDataSource(file.absolutePath)
+        val frame = retriever.getFrameAtTime(frameUs)
+        retriever.release()
+        return frame
+    }
+
+    /**
+     * Mean absolute luma difference between the cropped frame and the
+     * full frame's band starting at [offsetY]. Both frames are decoded
+     * at the same width and the cropped height is exactly the full
+     * height minus the two bands, so pixels map one to one; sampled on
+     * a coarse grid.
+     */
+    private fun meanAbsDiff(a: Bitmap, b: Bitmap): Double {
+        val w = minOf(a.width, b.width)
+        val h = minOf(a.height, b.height)
+        val pa = IntArray(w * h)
+        val pb = IntArray(w * h)
+        a.getPixels(pa, 0, w, 0, 0, w, h)
+        b.getPixels(pb, 0, w, 0, 0, w, h)
+        var sum = 0L
+        for (i in 0 until w * h) {
+            val da = pa[i]
+            val db = pb[i]
+            sum += (kotlin.math.abs((da shr 16 and 0xFF) - (db shr 16 and 0xFF)) +
+                kotlin.math.abs((da shr 8 and 0xFF) - (db shr 8 and 0xFF)) +
+                kotlin.math.abs((da and 0xFF) - (db and 0xFF))) / 3
+        }
+        return sum.toDouble() / (w * h)
+    }
+
+    private fun saveEvidenceBitmap(name: String, bmp: Bitmap) {
+        val out = java.io.File(evidenceDir(), name)
+        java.io.FileOutputStream(out).use {
+            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+
+    private fun bandDifference(full: Bitmap, offsetY: Int, cropped: Bitmap): Double {
+        var sum = 0L
+        var count = 0
+        var y = 0
+        while (y < cropped.height) {
+            var x = 0
+            while (x < cropped.width) {
+                val a = full.getPixel(x, offsetY + y)
+                val b = cropped.getPixel(x, y)
+                val la = ((a shr 16 and 0xFF) + (a shr 8 and 0xFF) + (a and 0xFF)) / 3
+                val lb = ((b shr 16 and 0xFF) + (b shr 8 and 0xFF) + (b and 0xFF)) / 3
+                sum += kotlin.math.abs(la - lb)
+                count++
+                x += 61
+            }
+            y += 61
+        }
+        return if (count == 0) 255.0 else sum.toDouble() / count
     }
 
     private fun startConsentedRecording() {

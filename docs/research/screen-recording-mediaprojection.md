@@ -44,3 +44,30 @@ queue/WebView capture path records only the app's own WebView, not the
 home screen. MediaProjection is the documented, permission-gated route
 that covers both. Recordings stay local; sharing is a manual per-file
 action.
+
+## Follow-up findings (2026-11-19, 0.1.4 work)
+
+- On Android 14 (targetSdk 34) the system consent sheet itself offers
+  capturing a single app's window instead of the whole screen, via
+  `MediaProjectionConfig.createConfigForUserChoice()`, which is the
+  default behavior when the app passes no config. App-mode capture
+  excludes the status bar, navigation bar and system UI. No app code is
+  required beyond targeting API 34.
+  https://developer.android.com/media/grow/media-projection
+  https://developer.android.com/reference/android/media/projection/MediaProjectionConfig
+- An overlay view (for example a floating stop button) marked
+  `FLAG_SECURE` is excluded from MediaProjection capture, but the
+  captured video shows a black rectangle where the overlay sat - the
+  pixels are withheld, not composited over. That rules out an overlay
+  as a way to keep recorder controls out of the footage; the 0.1.4
+  start-delay option covers the same need without touching the capture.
+  https://stackoverflow.com/questions/40255237/hide-a-secure-view-completely-in-mediaprojection-android
+  Emulator enforcement of secure-surface exclusion is inconsistent, so
+  this behavior cannot be reliably tested on the emulator either.
+- Cropping fixed bands (status bar, navigation bar) out of the capture
+  is done by remapping the texture coordinates of the virtual-display
+  frame before encoding, so the output video is genuinely shorter in
+  height rather than black-banded. Bar heights come from
+  `WindowMetrics` system-window insets on API 30+, with a resource
+  fallback. Whether the inset values on a particular phone match its
+  real bars has to be verified on that phone.

@@ -33,11 +33,14 @@ Feature status:
 | --- | --- |
 | WebView capture (viewport + full-page) | implemented; fixture-page pixels verified by an emulator CI run; real-page and physical-phone fidelity not verified |
 | Queue list UI | implemented |
+| Home screen layout (status first, everyday controls, setup and diagnostics in a side menu) | implemented |
 | Local file queue/result transport | implemented (works with no account) |
 | Messaging account creation (explicit button, nine.testrun.org) | implemented; live provisioning not verified |
 | Pairing by invite QR (secure join) | implemented; not verified on a real phone |
 | Queue in / captures out over DeltaChat after pairing, attempted on each open | implemented; sync and send-back not verified end to end; activity-owned lifecycle not verified |
-| Screen recording (system consent prompt each session, local silent MP4, manual per-file share) | implemented; not yet verified on an emulator or physical phone |
+| Screen recording (system consent prompt each session, local silent MP4, manual per-file share) | implemented; stop/save/stillness verified on an API 34 emulator, not on a physical phone |
+| Recording options (start delay, auto-stop, hide system bars) | implemented; emulator verification pending |
+| GIF loop export (auto loop-point detection with manual trim fallback) | implemented; emulator verification pending |
 | Account backup/export | not built |
 | Real-Chrome capture mode | not planned for v1 |
 | In-app auto-update from releases | planned follow-up |
@@ -45,7 +48,7 @@ Feature status:
 
 ## Releases
 
-The signed test APK v0.1.2 is published as a direct [GitHub release asset](https://github.com/irvan-putra/bidik/releases/download/v0.1.2/bidik-v0.1.2.apk) (`bidik-v0.1.2.apk`, no ZIP); see the [release page](https://github.com/irvan-putra/bidik/releases/tag/v0.1.2). It adds opt-in screen recording (per-session system consent, silent local MP4, manual share) and adaptive/themed launcher icons. The recording flow is verified on an API 34 emulator - consent accept and deny, stop and save, playable video, and elapsed time kept through stillness (see [docs/verification/screen-recording-runtime.md](docs/verification/screen-recording-runtime.md)) - but not yet on a physical phone. Known 0.1.2 defect: its recorder shortens the video when the screen is still (a 6s still recording comes out ~1.7s); the corrected pipeline is on main and ships in the 0.1.3 test release. This remains a prototype and the unverified live path described above is not a verified phone-to-relay service.
+The signed test APK v0.1.2 is published as a direct [GitHub release asset](https://github.com/irvan-putra/bidik/releases/download/v0.1.2/bidik-v0.1.2.apk) (`bidik-v0.1.2.apk`, no ZIP); see the [release page](https://github.com/irvan-putra/bidik/releases/tag/v0.1.2). It adds opt-in screen recording (per-session system consent, silent local MP4, manual share) and adaptive/themed launcher icons. The recording flow is verified on an API 34 emulator - consent accept and deny, stop and save, playable video, and elapsed time kept through stillness (see [docs/verification/screen-recording-runtime.md](docs/verification/screen-recording-runtime.md)) - but not yet on a physical phone. Known 0.1.2 defect: its recorder shortens the video when the screen is still (a 6s still recording comes out ~1.7s); the corrected pipeline ships in [v0.1.3](https://github.com/irvan-putra/bidik/releases/tag/v0.1.3). A v0.1.4 test release with the recording options and GIF loop export above is in preparation. This remains a prototype and the unverified live path described above is not a verified phone-to-relay service.
 
 Earlier: [v0.1.1](https://github.com/irvan-putra/bidik/releases/tag/v0.1.1), [v0.1.0](https://github.com/irvan-putra/bidik/releases/tag/v0.1.0).
 
@@ -101,8 +104,17 @@ included - to a silent MP4 in the app-private files dir. There is no
 microphone access, no upload, and no queue integration: recordings stay
 on the phone until you share one explicitly from the app's list or clear
 the app's data. Recording stops from the notification action, the app's
-stop button, or automatically after ten minutes; a recording that
-receives no frames deletes its partial file. See
+stop button, an optional auto-stop timer, or automatically after ten
+minutes; a recording that receives no frames deletes its partial file.
+An optional start delay gives time to reach the screen you want before
+capture begins, and an optional hide-bars setting crops the status and
+navigation bars out of the video entirely (the video itself is shorter,
+no black bands). Recordings can also be exported as looping GIFs: the
+exporter looks for the loop point where the screen returns to a state
+it showed earlier, requires real motion inside the candidate so a
+static screen cannot pass as a loop, ignores the cropped bar rows while
+matching, and falls back to a manual start/end trim when no confident
+loop is found. The original MP4 is never modified. See
 [the MediaProjection research note](docs/research/screen-recording-mediaprojection.md).
 
 ## Queue / result protocol (v1, draft)

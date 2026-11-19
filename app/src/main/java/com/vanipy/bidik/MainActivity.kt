@@ -18,6 +18,8 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.GravityCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.vanipy.bidik.bot.DcQueueTransport
@@ -29,10 +31,15 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * Whole screen is the queue list: no headings, no filler.
+ * Home screen: plain-language status first, then the everyday controls
+ * (screen recording, page captures, the queue). Messaging setup and
+ * diagnostics live in the hidden left menu so the main screen stays
+ * readable; every function from the prototype layout is kept, only
+ * tucked away.
  *
  * Two stages:
- * - Prototype (unpaired): local file transport, manual Run button.
+ * - Prototype (unpaired): local file transport, manual Run button, and
+ *   a visible hint that opens the setup menu.
  * - Paired: on open the app syncs the queue from the paired contact and
  *   runs the capture pass automatically - the target flow. The Run button
  *   stays only as a manual re-run.
@@ -86,14 +93,30 @@ class MainActivity : AppCompatActivity() {
             renderRecordSection()
         }
 
+    internal lateinit var drawer: DrawerLayout
     private lateinit var recordBtn: Button
+    private lateinit var menuHintBtn: Button
     private lateinit var recordingsBox: LinearLayout
+    private lateinit var delayBtn: Button
+    private lateinit var autoStopBtn: Button
+    private lateinit var barsBtn: Button
 
     private val recordStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.getStringExtra(ScreenRecordService.EXTRA_STATE)) {
+                ScreenRecordService.STATE_STARTING -> {
+                    val left = intent.getIntExtra(ScreenRecordService.EXTRA_REMAINING_SEC, -1)
+                    status.text = if (left > 0) {
+                        "recording starts in ${left}s - switch to the screen to share"
+                    } else {
+                        "preparing the recorder..."
+                    }
+                }
+                ScreenRecordService.STATE_RECORDING ->
+                    status.text = "recording the screen... stop from the notification or here"
                 ScreenRecordService.STATE_SAVED -> status.text = "recording saved on this phone"
                 ScreenRecordService.STATE_FAILED -> status.text = "screen recording failed or was empty"
+                ScreenRecordService.STATE_CANCELED -> status.text = "recording canceled before it started"
             }
             renderRecordSection()
         }
@@ -101,44 +124,118 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val scroll = ScrollView(this)
+
+        // Main content: title, status, then one scrolling column with the
+        // everyday sections. Section headers make the screen readable at a
+        // glance; everything the prototype layout had is still here.
+        val menuBtn = Button(this).apply {
+            text = "Menu"
+            setOnClickListener { drawer.openDrawer(GravityCompat.START) }
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(menuBtn)
+            addView(TextView(this@MainActivity).apply {
+                text = "bidik"
+                textSize = 20f
+                setPadding(16, 8, 8, 8)
+                gravity = Gravity.CENTER_VERTICAL
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        status = TextView(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(24, 8, 24, 8) }
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            visibility = View.GONE
+        }
+        menuHintBtn = Button(this).apply {
+            text = "Set up messaging sync (in the menu)"
+            setOnClickListener { drawer.openDrawer(GravityCompat.START) }
+        }
+
         listView = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(listView)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        recordingsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val runBtn = Button(this).apply {
             text = "Run capture"
             setOnClickListener { runCapture() }
         }
-        root.addView(runBtn)
+        val optionsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        delayBtn = Button(this).apply {
+            setOnClickListener { RecordOptions.cycleDelay(this@MainActivity); renderRecordSection() }
+        }
+        autoStopBtn = Button(this).apply {
+            setOnClickListener { RecordOptions.cycleAutoStop(this@MainActivity); renderRecordSection() }
+        }
+        barsBtn = Button(this).apply {
+            setOnClickListener {
+                RecordOptions.setBarsHidden(this@MainActivity, !RecordOptions.barsHidden(this@MainActivity))
+                renderRecordSection()
+            }
+        }
+        optionsRow.addView(delayBtn, LinearLayout.LayoutParams(0, -2, 1f))
+        optionsRow.addView(autoStopBtn, LinearLayout.LayoutParams(0, -2, 1f))
+        optionsRow.addView(barsBtn, LinearLayout.LayoutParams(0, -2, 1f))
         recordBtn = Button(this).apply {
             setOnClickListener { onRecordClicked() }
         }
-        root.addView(recordBtn)
-        recordingsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(recordingsBox)
-        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            visibility = View.GONE
+
+        fun sectionHeader(label: String) = TextView(this).apply {
+            text = label
+            textSize = 16f
+            setPadding(24, 24, 24, 4)
         }
-        root.addView(progress)
-        status = TextView(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(24, 8, 24, 8) }
-        root.addView(status)
-        root.addView(Button(this).apply {
-            text = "Diagnostics"
-            setOnClickListener { showDiagnostics() }
-        })
+        val mainColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(sectionHeader("Screen recording"))
+            addView(optionsRow)
+            addView(recordBtn)
+            addView(recordingsBox)
+            addView(sectionHeader("Page captures"))
+            addView(runBtn)
+            addView(listView)
+        }
+        val mainScroll = ScrollView(this).apply { addView(mainColumn) }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(header)
+            addView(status)
+            addView(progress)
+            addView(mainScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(menuHintBtn)
+        }
+
+        // Hidden left menu: messaging setup and diagnostics. The setup
+        // content (account, pairing, retention notes) can exceed the
+        // leftover screen on small phones; it must scroll or the lower
+        // rows are unreachable.
         setupBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 8, 24, 16)
         }
-        // The setup content (account, pairing, retention notes) can
-        // exceed the leftover screen on small phones; it must scroll or
-        // the lower rows are unreachable. Shares the leftover space with
-        // the queue list, which already scrolls.
-        val setupScroll = ScrollView(this)
-        setupScroll.addView(setupBox)
-        root.addView(setupScroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        setContentView(root)
+        val setupScroll = ScrollView(this).apply { addView(setupBox) }
+        val drawerColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = "setup & diagnostics"
+                textSize = 16f
+                setPadding(24, 24, 24, 4)
+            })
+            addView(setupScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(Button(this@MainActivity).apply {
+                text = "Diagnostics"
+                setOnClickListener { showDiagnostics() }
+            })
+            setBackgroundColor(0xFFFFFFFF.toInt())
+        }
+        val density = resources.displayMetrics.density
+        val drawerWidth = (resources.displayMetrics.widthPixels * 0.85f).toInt()
+            .coerceAtMost((320 * density).toInt())
+        val drawerParams = DrawerLayout.LayoutParams(drawerWidth, -1, GravityCompat.START)
+        drawerColumn.layoutParams = drawerParams
+
+        drawer = DrawerLayout(this).apply {
+            addView(content, DrawerLayout.LayoutParams(-1, -1))
+            addView(drawerColumn, drawerParams)
+        }
+        setContentView(drawer)
         DiagLog.log(this, "app", "open")
 
         val filter = IntentFilter(ScreenRecordService.ACTION_STATUS)
@@ -156,6 +253,16 @@ class MainActivity : AppCompatActivity() {
             refreshList { runCapture() }
         } else {
             refreshList()
+        }
+    }
+
+    @Deprecated("DrawerLayout edge handling")
+    override fun onBackPressed() {
+        if (drawer.isDrawerOpen(GravityCompat.START)) {
+            drawer.closeDrawer(GravityCompat.START)
+        } else {
+            @Suppress("DEPRECATION")
+            super.onBackPressed()
         }
     }
 
@@ -181,6 +288,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderSetup() {
         setupBox.removeAllViews()
+        menuHintBtn.visibility = if (SetupController.isPaired(this)) View.GONE else View.VISIBLE
         if (SetupController.isPaired(this)) {
             setupBox.addView(Button(this).apply {
                 text = "Unpair"
@@ -303,8 +411,11 @@ class MainActivity : AppCompatActivity() {
     internal fun renderRecordSection() {
         val activeName = RecordingStore.activeName(this)
         recordBtn.text = if (activeName != null) "Stop recording" else "Record screen"
+        delayBtn.text = "start delay: ${RecordOptions.delayLabel(RecordOptions.delaySeconds(this))}"
+        autoStopBtn.text = "auto-stop: ${RecordOptions.autoStopLabel(RecordOptions.autoStopSeconds(this))}"
+        barsBtn.text = if (RecordOptions.barsHidden(this)) "system bars: hidden" else "system bars: shown"
         recordingsBox.removeAllViews()
-        val recordings = RecordingStore.list(this)
+        val recordings = RecordingStore.listSharable(this)
         if (recordings.isNotEmpty()) {
             recordingsBox.addView(TextView(this).apply {
                 text = "recordings on this phone (local only; share is manual):"
@@ -316,6 +427,12 @@ class MainActivity : AppCompatActivity() {
                     text = "${file.name}  ${file.length() / (1024 * 1024)} MB"
                     setPadding(24, 20, 24, 20)
                 }, LinearLayout.LayoutParams(0, -2, 1f))
+                if (file.extension == "mp4") {
+                    row.addView(Button(this).apply {
+                        text = "GIF"
+                        setOnClickListener { showGifExport(file) }
+                    })
+                }
                 row.addView(Button(this).apply {
                     text = "Share"
                     setOnClickListener { shareRecording(file) }
@@ -330,12 +447,139 @@ class MainActivity : AppCompatActivity() {
             this, "com.vanipy.bidik.fileprovider", file
         )
         val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-            type = "video/mp4"
+            type = if (file.extension == "gif") "image/gif" else "video/mp4"
             putExtra(android.content.Intent.EXTRA_STREAM, uri)
             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(android.content.Intent.createChooser(intent, "Share recording"))
         DiagLog.log(this, "record", "shared")
+    }
+
+    /**
+     * Looping-GIF export for one recording. The dialog runs the loop
+     * search (same-screen recurrence) and offers its candidates; the
+     * start/end fields stay editable as the manual fallback. The source
+     * MP4 is never modified.
+     */
+    internal fun showGifExport(file: File) {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 8)
+        }
+        val state = TextView(this).apply { text = "looking for loop points..." }
+        val candidatesBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val startField = EditText(this).apply {
+            hint = "start (seconds)"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        val endField = EditText(this).apply {
+            hint = "end (seconds)"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        val exportBtn = Button(this).apply { text = "Export GIF" }
+        box.addView(state)
+        box.addView(candidatesBox)
+        box.addView(startField)
+        box.addView(endField)
+        box.addView(exportBtn)
+        AlertDialog.Builder(this)
+            .setTitle("looping GIF from ${file.name}")
+            .setView(box)
+            .setNegativeButton("Close", null)
+            .show()
+
+        // The loop search skips the same bands the hidden-bars option
+        // crops away, so a clock change there cannot break a match.
+        val bands = if (RecordOptions.barsHidden(this)) SystemBars.bands(this) else null
+        val metrics = resources.displayMetrics
+        scope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val result = try {
+                LoopAnalyzer.analyze(
+                    file,
+                    maskTopFraction = if (bands != null && metrics.heightPixels > 0) {
+                        bands.topPx.toFloat() / metrics.heightPixels
+                    } else 0f,
+                    maskBottomFraction = if (bands != null && metrics.heightPixels > 0) {
+                        bands.bottomPx.toFloat() / metrics.heightPixels
+                    } else 0f
+                )
+            } catch (e: Exception) {
+                launch(kotlinx.coroutines.Dispatchers.Main) {
+                    state.text = "loop search failed; type the span by hand"
+                }
+                return@launch
+            }
+            launch(kotlinx.coroutines.Dispatchers.Main) {
+                if (result.candidates.isEmpty()) {
+                    state.text = if (result.bestEffort != null) {
+                        "no clean loop found; best guess filled in - adjust by hand"
+                    } else {
+                        "no loop found in this recording; type the span by hand"
+                    }
+                } else {
+                    state.text = "loop points found; tap one or adjust by hand:"
+                }
+                val fill = result.candidates.firstOrNull() ?: result.bestEffort
+                if (fill != null) {
+                    startField.setText((fill.startMs / 1000.0).toString())
+                    endField.setText((fill.endMs / 1000.0).toString())
+                }
+                for (c in result.candidates) {
+                    candidatesBox.addView(Button(this@MainActivity).apply {
+                        text = "%.1fs to %.1fs - seam %d%%".format(
+                            c.startMs / 1000.0, c.endMs / 1000.0, (c.seam * 100).toInt()
+                        )
+                        setOnClickListener {
+                            startField.setText((c.startMs / 1000.0).toString())
+                            endField.setText((c.endMs / 1000.0).toString())
+                        }
+                    })
+                }
+            }
+        }
+
+        exportBtn.setOnClickListener {
+            val startMs = ((startField.text.toString().toDoubleOrNull() ?: -1.0) * 1000).toLong()
+            val endMs = ((endField.text.toString().toDoubleOrNull() ?: -1.0) * 1000).toLong()
+            if (startMs < 0 || endMs <= startMs) {
+                state.text = "start/end need numbers, end after start"
+                return@setOnClickListener
+            }
+            exportBtn.isEnabled = false
+            state.text = "exporting..."
+            scope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                try {
+                    val target = RecordingStore.newGifFile(this@MainActivity)
+                    val partial = java.io.File(cacheDir, target.name + ".part")
+                    partial.delete()
+                    val outcome = GifExporter.export(file, startMs, endMs, partial,
+                        onProgress = { done, total ->
+                            launch(kotlinx.coroutines.Dispatchers.Main) {
+                                state.text = "exporting frame $done of about $total..."
+                            }
+                        })
+                    if (!partial.renameTo(target) || outcome.bytes <= 0) {
+                        partial.delete()
+                        throw java.io.IOException("could not move the GIF into place")
+                    }
+                    DiagLog.log(this@MainActivity, "gif", "exported",
+                        detail = "frames=${outcome.frames}")
+                    launch(kotlinx.coroutines.Dispatchers.Main) {
+                        state.text = "saved ${target.name} (${outcome.width}x${outcome.height}, " +
+                            "${outcome.frames} frames, loops forever)"
+                        exportBtn.isEnabled = true
+                        renderRecordSection()
+                    }
+                } catch (e: Exception) {
+                    launch(kotlinx.coroutines.Dispatchers.Main) {
+                        state.text = "GIF export failed: ${e.message}"
+                        exportBtn.isEnabled = true
+                    }
+                }
+            }
+        }
     }
 
     override fun onResume() {
