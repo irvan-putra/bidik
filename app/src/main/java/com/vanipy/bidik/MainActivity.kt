@@ -147,7 +147,7 @@ class MainActivity : AppCompatActivity() {
             visibility = View.GONE
         }
         menuHintBtn = Button(this).apply {
-            text = "Set up messaging sync (in the menu)"
+            text = "Messaging sync: not connected (see menu)"
             setOnClickListener { drawer.openDrawer(GravityCompat.START) }
         }
 
@@ -214,7 +214,7 @@ class MainActivity : AppCompatActivity() {
         val drawerColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply {
-                text = "setup & diagnostics"
+                text = "advanced: setup & diagnostics"
                 textSize = 16f
                 setPadding(24, 24, 24, 4)
             })
@@ -323,6 +323,9 @@ class MainActivity : AppCompatActivity() {
             // Pairing needs the account first: the handshake runs over
             // the account's own transport, and the peer address comes
             // back from it.
+            setupBox.addView(TextView(this).apply {
+                text = "legacy route: a separate messaging account inside bidik. Sync through jin is the planned direction and is not built yet."
+            })
             setupBox.addView(TextView(this).apply {
                 text = "step 1: create a NEW messaging account on relay nine.testrun.org. Its keys live only on this phone; backup/export is not built yet, so clearing app data loses the account."
             })

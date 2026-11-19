@@ -57,11 +57,11 @@ class MainActivityRenderTest {
         assertTrue("Menu button must be present", findButton(root, "Menu"))
         // The drawer is part of the hierarchy even while closed.
         assertTrue("Diagnostics must stay reachable in the menu", findButton(root, "Diagnostics"))
-        // Fresh install: the path into messaging setup must be visible
-        // on the main screen without opening the menu first.
+        // Fresh install: the sync status must be visible on the main
+        // screen without steering into a new standalone account.
         assertTrue(
-            "setup hint must be visible while unpaired",
-            findButton(root, "Set up messaging sync (in the menu)")
+            "sync status hint must be visible while unpaired",
+            findButton(root, "Messaging sync: not connected (see menu)")
         )
         // The menu must start closed: home screen is the everyday view.
         assertTrue(
@@ -103,6 +103,24 @@ class MainActivityRenderTest {
         FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         assertTrue("render missing: $out", out.exists() && out.length() > 5_000)
         assertTrue("Diagnostics must be in the menu", findButton(root, "Diagnostics"))
+    }
+
+    @Test
+    fun recordingRowsShowGifAndShareActions() {
+        // A saved MP4 must offer the end-user GIF export and share
+        // actions directly on its row.
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val dir = RecordingStore.dir(app)
+        dir.mkdirs()
+        val mp4 = File(dir, "bidik-20261119-090000.mp4")
+        mp4.writeBytes(ByteArray(1024) { it.toByte() })
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        Thread.sleep(1500)
+        val root = activity.window.decorView
+        assertTrue("GIF action missing on a saved mp4 row", findButton(root, "GIF"))
+        assertTrue("Share action missing on a saved mp4 row", findButton(root, "Share"))
+        mp4.delete()
     }
 
     companion object {
