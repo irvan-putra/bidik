@@ -352,6 +352,29 @@ class ScreenRecordTest {
         // Evidence first: whatever the assertions decide, the analyzed
         // clip and the search's own numbers land in the artifact.
         recording.copyTo(java.io.File(evidenceDir(), "loop-source-" + recording.name), overwrite = true)
+        if (result.candidates.isNotEmpty()) {
+            // The matcher's own view of the top candidate's endpoints:
+            // the 64x36 luma grids it compared, saved as PNGs. When the
+            // full-resolution seam frames disagree with the grid seam,
+            // these show which side misread the screen.
+            val probe = MediaMetadataRetriever()
+            probe.setDataSource(recording.absolutePath)
+            val topForProbe = result.candidates.first()
+            for (pair in listOf("start" to topForProbe.startMs, "end" to topForProbe.endMs)) {
+                val g = LoopAnalyzer.sampleGrid(probe, pair.second * 1000L)
+                if (g != null) {
+                    val px = IntArray(LoopAnalyzer.GRID_W * LoopAnalyzer.GRID_H) { i ->
+                        val v = g[i].toInt() and 0xFF
+                        (0xFF shl 24) or (v shl 16) or (v shl 8) or v
+                    }
+                    val bmp = Bitmap.createBitmap(
+                        px, LoopAnalyzer.GRID_W, LoopAnalyzer.GRID_H, Bitmap.Config.ARGB_8888
+                    )
+                    saveEvidenceBitmap("loop-grid-" + pair.first + ".png", bmp)
+                }
+            }
+            probe.release()
+        }
         java.io.File(evidenceDir(), "loop-analysis.txt").writeText(
             "duration recording=${recording.name} size=${recording.length()}\n" +
             "candidates:\n" +
@@ -402,10 +425,10 @@ class ScreenRecordTest {
         val seamB = frameAt(recording, top.endMs * 1000L)
         assertNotNull("no frame at loop start", seamA)
         assertNotNull("no frame at loop end", seamB)
-        val mad = meanAbsDiff(seamA!!, seamB!!)
-        assertTrue("loop endpoints differ on screen (MAD $mad)", mad <= 12.0)
         saveEvidenceBitmap("loop-seam-start.png", seamA)
         saveEvidenceBitmap("loop-seam-end.png", seamB)
+        val mad = meanAbsDiff(seamA!!, seamB!!)
+        assertTrue("loop endpoints differ on screen (MAD $mad)", mad <= 12.0)
 
         // Neighbor evidence one phase (400ms) past the endpoints. If
         // the wrap jumped, only the endpoints would match; the frames
