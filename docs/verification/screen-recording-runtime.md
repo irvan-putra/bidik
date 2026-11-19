@@ -9,6 +9,44 @@ system consent dialog through UiAutomator. This is a synthetic
 environment; nothing here claims correctness on the user's Galaxy A24
 home screen - that check is the user's, on his device.
 
+## Verified behavior for 0.1.4 (run 44443222912, commit aef1ca6, 2026-11-19)
+
+Record job green on the same API 34 emulator profile; pixel evidence in
+the run's `record-pixels` artifact. Host unit tests: 46/46 green,
+including the loop-detection hardening cases.
+
+- `delayedStartTrimsClipStart`: 5s start delay. The status sequence runs
+  starting -> recording -> saved, and the saved clip holds only the
+  post-delay span (2.2s-6s for ~3s recorded after the delay;
+  `delayed-frame.png`).
+- `autoStopSavesWithoutInteraction`: 15s auto-stop saves with no further
+  interaction; the MP4 is playable with elapsed 13s-25s
+  (`autostop-frame.png`).
+- `hiddenBarsCropTheVideo`: with system bars hidden, the saved video is
+  exactly full width by (full height - status bar - nav bar): 320x616 vs
+  320x640 on this profile. The cropped frame matches the middle band of
+  an un-cropped frame (mean abs diff < 25), so the crop removes the bars
+  instead of scaling or double-cropping content
+  (`cropped-bars-frame.png`).
+- `loopFoundAndGifExported`: a periodically changing screen yields a
+  loop candidate with seam >= 0.95 over the ~800ms cycle; export writes
+  a GIF89a with the NETSCAPE2.0 infinite-loop marker, 8 frames at 100ms,
+  320x640, decodable on Android (`loop-test.gif`). The full-resolution
+  source frames at the loop endpoints are pixel-identical in this run
+  (`loop-seam-start.png` / `loop-seam-end.png`, mean abs diff 0), so the
+  wrap does not visibly jump. The host-side GIF encoder output was also
+  cross-verified against Pillow's decoder (0 mismatched pixels, loop
+  marker present).
+- `noLoopInNonRepeatingRecording`: six grays stepping in one direction
+  (real motion that never returns to an earlier state) produce no
+  confident loop candidate, and the best-effort guess stays below the
+  0.90 bar. A still screen cannot fake a loop either: candidates require
+  real interior motion.
+
+The pre-existing consent and elapsed-time tests are unchanged and still
+pass: denial records nothing; animated and static recordings preserve
+wall-clock elapsed time with a decodable still tail.
+
 ## Verified behavior (run 44376936012, commit e7510fc, 2026-11-18)
 
 All three instrumented tests passed (`OK (3 tests)`):
