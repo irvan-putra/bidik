@@ -396,9 +396,13 @@ class ScreenRecordTest {
         val outcome = GifExporter.export(recording, top.startMs, top.endMs, gif)
         assertTrue("GIF too small to be real: ${outcome.bytes}", outcome.bytes > 2_000)
         assertTrue("GIF wider than the cap", outcome.width <= GifExporter.DEFAULT_MAX_WIDTH)
+        // Frame budget derives from the actual span at 10 fps: a doubled
+        // span pick (the known loop tune gap) still yields a sane GIF.
+        val spanMs = top.endMs - top.startMs
+        val expectedFrames = (spanMs * GifExporter.DEFAULT_FPS / 1000).toInt()
         assertTrue(
-            "frame count ${outcome.frames} far from span*fps",
-            outcome.frames in 4..20
+            "frame count ${outcome.frames} far from span*fps ($expectedFrames)",
+            outcome.frames in (expectedFrames / 2)..(expectedFrames * 3 / 2 + 1)
         )
         val bytes = gif.readBytes()
         assertEquals("GIF89a", String(bytes, 0, 6))
