@@ -26,6 +26,15 @@ env:
   EXPECTED_LABEL: bidik
   BUILD_TOOLS_VERSION: 34.0.0
 jobs:
+  consistency:
+    # patuh pre-publish source gate (package, version, label, permission
+    # drift, family icon). Required before anything is built or signed.
+    # Pinned to the reviewed full SHA; tags are movable.
+    if: ${{ inputs.confirm_sign == 'SIGN' && github.ref == 'refs/heads/main' }}
+    uses: irvan-putra/patuh/.github/workflows/release-gate.yml@4e064163e62a3cf677e11de016ffbb6f4041816b
+    with:
+      app: bidik
+      published: false
   gate:
     if: ${{ inputs.confirm_sign == 'SIGN' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
@@ -37,7 +46,7 @@ jobs:
       - name: Verifier self-test (synthetic bad inputs must fail)
         run: bash tools/test-verify-signed-apk.sh
   build:
-    needs: gate
+    needs: [gate, consistency]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
