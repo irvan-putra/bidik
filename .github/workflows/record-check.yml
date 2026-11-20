@@ -27,10 +27,15 @@ jobs:
           python-version: '3.10'
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest
+      - name: Locate render evidence
+        if: always()
+        run: find "$GITHUB_WORKSPACE" /home/runner -name 'bidik-trim-*.png' -print 2>/dev/null
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: unit-test-results
-          path: app/build/test-results/testDebugUnitTest/
+          path: |
+            app/build/test-results/testDebugUnitTest/
+            **/bidik-trim-*.png
           if-no-files-found: error
