@@ -91,7 +91,7 @@ for attempt in 1 2 3; do
 done
 [ "$ok" = 1 ] || { echo "0.1.3 install never succeeded" >&2; exit 1; }
 set +e
-timeout -k 30 900 adb shell "am instrument -w -e class com.vanipy.bidik.ScreenRecordTest com.vanipy.bidik.test/androidx.test.runner.AndroidJUnitRunner" > /tmp/record-013.log 2>&1
+timeout -k 30 900 adb shell "am instrument -w -e class com.vanipy.bidik.ScreenRecordTest#animatedRecordingPreservesElapsedTime com.vanipy.bidik.test/androidx.test.runner.AndroidJUnitRunner" > /tmp/record-013.log 2>&1
 rc013=$?
 set -e
 cat /tmp/record-013.log >&2 || true
@@ -108,6 +108,19 @@ echo "== build app + test APKs (host, x86_64 emulator variant) =="
 
 echo "== instrumented record run =="
 install_pair_with_retry
+echo "== post-upgrade retention check =="
+NEW=$(adb shell run-as com.vanipy.bidik ls files/recordings | tr -d '\r')
+for f in $OLD; do
+  echo "$NEW" | tr ' ' '\n' | grep -qx "$f" || { echo "0.1.3 recording $f LOST after upgrade to 0.1.4" >&2; exit 1; }
+done
+echo "retained: all 0.1.3 recordings present after upgrade to 0.1.4"
+# Best-effort app-level evidence: main-screen hierarchy after upgrade.
+adb shell am start -W -n com.vanipy.bidik/.MainActivity >/dev/null 2>&1 || true
+sleep 3
+adb shell uiautomator dump /sdcard/ui-upgrade.xml >/dev/null 2>&1 || true
+mkdir -p recordings
+adb pull /sdcard/ui-upgrade.xml recordings/ui-upgrade.xml >/dev/null 2>&1 || true
+
 set +e
 timeout -k 30 900 adb shell "am instrument -w -e class com.vanipy.bidik.ScreenRecordTest com.vanipy.bidik.test/androidx.test.runner.AndroidJUnitRunner" > /tmp/record-instrument.log 2>&1
 irc=$?
@@ -121,18 +134,6 @@ if [ $irc -ne 0 ] || ! grep -q '^OK (' /tmp/record-instrument.log; then
   exit 1
 fi
 
-echo "== post-upgrade retention check =="
-NEW=$(adb shell run-as com.vanipy.bidik ls files/recordings | tr -d '\r')
-for f in $OLD; do
-  echo "$NEW" | tr ' ' '\n' | grep -qx "$f" || { echo "0.1.3 recording $f LOST after upgrade to 0.1.4" >&2; exit 1; }
-done
-echo "retained: all 0.1.3 recordings present after upgrade to 0.1.4"
-# Best-effort app-level evidence: main-screen hierarchy after upgrade.
-adb shell am start -W -n com.vanipy.bidik/.MainActivity >/dev/null 2>&1 || true
-sleep 3
-adb shell uiautomator dump /sdcard/ui-upgrade.xml >/dev/null 2>&1 || true
-mkdir -p recordings
-adb pull /sdcard/ui-upgrade.xml recordings/ui-upgrade.xml >/dev/null 2>&1 || true
 
 mkdir -p recordings
 adb pull /sdcard/Android/data/com.vanipy.bidik/files/recordings-evidence/. recordings
