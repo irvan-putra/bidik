@@ -37,5 +37,5 @@ jobs:
           name: unit-test-results
           path: |
             app/build/test-results/testDebugUnitTest/
-            /tmp/bidik-*.png
+            app/build/reports/bidik-*.png
           if-no-files-found: error

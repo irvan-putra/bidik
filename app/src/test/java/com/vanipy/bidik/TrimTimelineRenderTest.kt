@@ -79,7 +79,7 @@ class TrimTimelineRenderTest {
         assertTrue("thumbnails never loaded", view.loadedSlots() > 0)
 
         // Whole-recording selection first: no dimming, handles at the edges.
-        render(view, 540, 96, File("/tmp/bidik-trim-full.png"))
+        render(view, 540, 96, File("build/reports/bidik-trim-full.png"))
 
         // Thumbnails were requested through the source (async loader may
         // still be running; the loader path is exercised either way).
@@ -90,7 +90,7 @@ class TrimTimelineRenderTest {
         view.listener = { s, e, scrubbing, _ -> notified = Triple(s, e, scrubbing) }
         view.setSpan(1000, 3000)
         assertEquals(Triple(1000L, 3000L, false), notified)
-        render(view, 540, 96, File("/tmp/bidik-trim-span.png"))
+        render(view, 540, 96, File("build/reports/bidik-trim-span.png"))
     }
 
     @Test
