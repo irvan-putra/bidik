@@ -407,9 +407,12 @@ def _send_result_impl(acct, files_dir, peer_addr, result_json, attachment_paths)
     chat = _peer_chat(acct, files_dir, peer_addr)
     first = chat.send_text(result_json)
     try:
-        page_id = json.loads(result_json).get("page_id", "page")
+        res = json.loads(result_json)
+        page_id = res.get("page_id", "page")
+        queue_id = res.get("queue_id", "unknown")
     except Exception:
         page_id = "page"
+        queue_id = "unknown"
     last = None
     for p in attachment_paths:
         # Caption ties each image back to its result message; the result
@@ -417,7 +420,8 @@ def _send_result_impl(acct, files_dir, peer_addr, result_json, attachment_paths)
         # send_message(text=..., file=...) is the only caption-carrying
         # send in 2.69: send_file() takes no text argument, and a silent
         # TypeError fallback here once shipped files with no caption.
-        caption = "capture-result-file:%s:%s" % (page_id, os.path.basename(p))
+        caption = "capture-result-file:%s:%s:%s" % (
+            queue_id, page_id, os.path.basename(p))
         last = chat.send_message(text=caption, file=p)
     # One delivery wait for the whole result: SMTP jobs drain in order, so
     # the last file leaving the device covers the text sent before it. A

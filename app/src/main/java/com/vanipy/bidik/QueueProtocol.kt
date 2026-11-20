@@ -15,7 +15,7 @@ import org.json.JSONObject
  *     "mode":"webview","full_page":true,"wait_ms":3000,"notes":"..."}]}
  *
  * Result message: JSON body + PNG attachment(s):
- *   {"type":"capture-result","v":1,"page_id":"...","url_final":"...",
+ *   {"type":"capture-result","v":1,"queue_id":"...","page_id":"...","url_final":"...",
  *    "captured_at":"...","engine":"webview","webview_version":"...",
  *    "device":{"width_dp":..,"height_dp":..,"density":..,"font_scale":..},
  *    "load_ms":..,"settle_ms":..,"captures":["..."],"status":"ok|failed",
@@ -64,6 +64,7 @@ object QueueProtocol {
 
     fun resultJson(
         job: PageJob,
+        queueId: String,
         urlFinal: String,
         capturedAt: String,
         engine: String,
@@ -78,6 +79,7 @@ object QueueProtocol {
         val r = JSONObject()
         r.put("type", RESULT_TYPE)
         r.put("v", VERSION)
+        r.put("queue_id", queueId)
         r.put("page_id", job.id)
         r.put("url_final", urlFinal)
         r.put("captured_at", capturedAt)

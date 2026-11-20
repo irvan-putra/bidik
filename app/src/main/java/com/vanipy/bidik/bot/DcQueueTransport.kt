@@ -61,6 +61,8 @@ class DcQueueTransport(
             pages
         }
 
+    override fun currentQueueId(): String? = lastQueueId
+
     override suspend fun sendResult(resultJson: String, attachments: List<File>) =
         withContext(Dispatchers.IO) {
             ensurePython()

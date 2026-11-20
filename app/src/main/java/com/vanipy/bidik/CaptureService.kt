@@ -66,6 +66,7 @@ class CaptureRunner(
                 iso.timeZone = TimeZone.getDefault()
                 val resultJson = QueueProtocol.resultJson(
                     job = job,
+                    queueId = transport.currentQueueId() ?: "unknown",
                     urlFinal = out.urlFinal,
                     capturedAt = iso.format(Date()),
                     engine = "webview",
@@ -84,6 +85,7 @@ class CaptureRunner(
             } catch (e: Exception) {
                 val resultJson = QueueProtocol.resultJson(
                     job = job,
+                    queueId = transport.currentQueueId() ?: "unknown",
                     urlFinal = job.url,
                     capturedAt = iso.format(Date()),
                     engine = "webview",

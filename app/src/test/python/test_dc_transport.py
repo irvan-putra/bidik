@@ -323,7 +323,8 @@ class SendResultTest(unittest.TestCase):
         self.dir.cleanup()
 
     def test_order_and_caption_matching(self):
-        result = json.dumps({"type": "capture-result", "page_id": "a",
+        result = json.dumps({"type": "capture-result", "queue_id": "q1",
+                             "page_id": "a",
                              "captures": ["a-viewport.png"], "status": "ok"})
         t._send_result_impl(self.acct, self.dir.name, "peer@example.com", result,
                             ["/tmp/a-viewport.png"])
@@ -331,7 +332,7 @@ class SendResultTest(unittest.TestCase):
         self.assertEqual(sent[0][0], "text")  # result JSON first
         self.assertEqual(sent[1][0], "file")
         self.assertEqual(sent[1][1], "/tmp/a-viewport.png")
-        self.assertEqual(sent[1][2], "capture-result-file:a:a-viewport.png")
+        self.assertEqual(sent[1][2], "capture-result-file:q1:a:a-viewport.png")
 
     def test_partial_send_failure_raises_and_marks_nothing(self):
         def fail_second(text=None, file=None, **kw):

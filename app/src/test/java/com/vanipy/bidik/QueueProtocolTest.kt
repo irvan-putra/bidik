@@ -39,6 +39,7 @@ class QueueProtocolTest {
     fun resultJsonRoundTrip() {
         val s = QueueProtocol.resultJson(
             job = QueueProtocol.PageJob("a", "https://example.com/"),
+            queueId = "q-9",
             urlFinal = "https://example.com/",
             capturedAt = "2026-11-15T07:30:00+07:00",
             engine = "webview",
@@ -51,6 +52,7 @@ class QueueProtocolTest {
         )
         val r = JSONObject(s)
         assertEquals("capture-result", r.getString("type"))
+        assertEquals("q-9", r.getString("queue_id"))
         assertEquals("a", r.getString("page_id"))
         assertTrue(r.getJSONArray("captures").length() == 1)
     }

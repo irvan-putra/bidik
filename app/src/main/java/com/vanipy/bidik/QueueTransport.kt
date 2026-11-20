@@ -15,6 +15,9 @@ interface QueueTransport {
     /** Latest queue from the peer; empty list when none is pending. */
     suspend fun fetchQueue(): List<QueueProtocol.PageJob>
 
+    /** Id of the queue the last fetch returned, for result attribution. */
+    fun currentQueueId(): String?
+
     /** Send one page's result JSON + its PNG files back to the peer. */
     suspend fun sendResult(resultJson: String, attachments: List<File>)
 
@@ -33,6 +36,16 @@ class LocalQueueTransport(private val filesDir: File) : QueueTransport {
         val f = File(filesDir, "capture-queue.json")
         if (!f.exists()) return emptyList()
         return QueueProtocol.parseQueue(f.readText())
+    }
+
+    override fun currentQueueId(): String? {
+        val f = File(filesDir, "capture-queue.json")
+        if (!f.exists()) return null
+        return try {
+            org.json.JSONObject(f.readText()).optString("queue_id").ifEmpty { null }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     override suspend fun sendResult(resultJson: String, attachments: List<File>) {
