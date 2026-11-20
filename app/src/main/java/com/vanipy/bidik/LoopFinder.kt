@@ -49,6 +49,15 @@ object LoopFinder {
     /** Seam tolerance inside which a shorter span outranks a longer one. */
     const val RANK_SEAM_EPSILON: Double = 0.005
 
+    /**
+     * How much worse the frames one motion step past the endpoints may
+     * look versus the seam itself before the span stops counting as a
+     * loop. Endpoint coincidences (a half-period crossing, emulator run
+     * 44676369302: 1200ms span of a 1600ms animation, endpoint MAD
+     * 0.01, frames one step on MAD 19) match only at the seam.
+     */
+    private const val CONTINUATION_TOLERANCE: Double = 0.05
+
     /** One sampled frame as a downscaled luma grid. */
     class Frame(
         val timeMs: Long,
@@ -248,6 +257,7 @@ object LoopFinder {
                         best = Candidate(t0, frames[j].timeMs, seam)
                     }
                     if (seam >= seamThreshold &&
+                        continuesAcrossSeam(frames, i, j, weights, seam) &&
                         hasCycleMotion(frames, i, j, motionMin, weights) &&
                         returnsToStart(frames, i, j, weights, seam)
                     ) {
@@ -284,6 +294,33 @@ object LoopFinder {
             null
         }
         return Result(picked, bestEffort)
+    }
+
+    /**
+     * A true loop keeps matching one motion step past the seam: the
+     * frames just after both endpoints must be nearly as similar as
+     * the endpoints themselves. When the loop ends at the recording's
+     * tail the step before the endpoints is checked instead; with no
+     * neighbors either way the seam-only verdict stands.
+     */
+    private fun continuesAcrossSeam(
+        frames: List<Frame>, i: Int, j: Int, weights: DoubleArray, seam: Double
+    ): Boolean {
+        val span = frames[j].timeMs - frames[i].timeMs
+        val step = (span / 4).coerceIn(200L, 1_000L)
+        val afterI = indexOfTime(frames, frames[i].timeMs + step)
+        val afterJ = indexOfTime(frames, frames[j].timeMs + step)
+        if (afterI > i && afterJ > j) {
+            return similarity(frames[afterI], frames[afterJ], weights) >=
+                seam - CONTINUATION_TOLERANCE
+        }
+        val beforeI = indexOfTime(frames, frames[i].timeMs - step)
+        val beforeJ = indexOfTime(frames, frames[j].timeMs - step)
+        if (beforeI in 0 until i && beforeJ in i until j) {
+            return similarity(frames[beforeI], frames[beforeJ], weights) >=
+                seam - CONTINUATION_TOLERANCE
+        }
+        return true
     }
 
     private fun indexOfTime(frames: List<Frame>, timeMs: Long): Int {

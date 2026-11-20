@@ -60,6 +60,32 @@ class LoopFinderTest {
     }
 
     /**
+     * A ping-pong animation crosses itself: the block passes the same
+     * cell going opposite ways, so a 1200ms span of a 1600ms period
+     * matches at its endpoints while the motion inside disagrees.
+     * Endpoint coincidence must not outrank the true period (emulator
+     * run 44676369302 ranked exactly such a span first).
+     */
+    @Test
+    fun halfPeriodCrossingDoesNotBeatTheTruePeriod() {
+        // Triangle positions over an 8-sample (1600ms) period.
+        val pos = intArrayOf(0, 1, 2, 3, 4, 3, 2, 1)
+        val frames = (0 until 30).map { k -> frameAt(k * 200L, blockCol = pos[k % 8]) }
+        val result = LoopFinder.find(frames)
+        assertTrue("expected loop candidates", result.candidates.isNotEmpty())
+        val top = result.candidates.first()
+        assertEquals(
+            "candidates: " + result.candidates.joinToString { "${it.startMs}-${it.endMs}@${it.seam}" },
+            1600L, top.endMs - top.startMs
+        )
+        assertTrue(
+            "endpoint-coincidence 1200ms span must not qualify: " +
+                result.candidates.joinToString { "${it.startMs}-${it.endMs}" },
+            result.candidates.none { it.endMs - it.startMs == 1200L }
+        )
+    }
+
+    /**
      * A two-cycle span can read a hair cleaner than one cycle (codec
      * noise grows with what happens between the endpoints, not at
      * them). Within seam noise the tightest single cycle must still
