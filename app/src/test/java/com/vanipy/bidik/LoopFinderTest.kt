@@ -59,6 +59,102 @@ class LoopFinderTest {
         assertNull(result.bestEffort)
     }
 
+    /**
+     * A ping-pong animation crosses itself: the block passes the same
+     * cell going opposite ways, so a 1200ms span of a 1600ms period
+     * matches at its endpoints while the motion inside disagrees.
+     * Endpoint coincidence must not outrank the true period (emulator
+     * run 44676369302 ranked exactly such a span first).
+     */
+    @Test
+    fun halfPeriodCrossingDoesNotBeatTheTruePeriod() {
+        // Triangle positions over an 8-sample (1600ms) period.
+        val pos = intArrayOf(0, 1, 2, 3, 4, 3, 2, 1)
+        val frames = (0 until 30).map { k -> frameAt(k * 200L, blockCol = pos[k % 8]) }
+        val result = LoopFinder.find(frames)
+        assertTrue("expected loop candidates", result.candidates.isNotEmpty())
+        val top = result.candidates.first()
+        assertEquals(
+            "candidates: " + result.candidates.joinToString { "${it.startMs}-${it.endMs}@${it.seam}" },
+            1600L, top.endMs - top.startMs
+        )
+        assertTrue(
+            "endpoint-coincidence 1200ms span must not qualify: " +
+                result.candidates.joinToString { "${it.startMs}-${it.endMs}" },
+            result.candidates.none { it.endMs - it.startMs == 1200L }
+        )
+    }
+
+    /**
+     * A two-cycle span can read a hair cleaner than one cycle (codec
+     * noise grows with what happens between the endpoints, not at
+     * them). Within seam noise the tightest single cycle must still
+     * rank first - the exported GIF must not play the motion twice
+     * (emulator run 44457037709 ranked 3150ms over the true 1400ms).
+     */
+    @Test
+    fun singleCycleWinsOverTwoCyclesWithinSeamNoise() {
+        val frames = periodic(25).toMutableList()
+        // Dirty one endpoint cell of the (0, 800) pair by a single
+        // luma step: its seam drops just below the spotless (0, 1600).
+        val f800 = frames[4].luma
+        f800[1 * w + 0] = 219.toByte()
+        val result = LoopFinder.find(frames)
+        assertTrue("expected loop candidates", result.candidates.isNotEmpty())
+        val top = result.candidates.first()
+        assertEquals(
+            "candidates: " + result.candidates.joinToString { "${it.startMs}-${it.endMs}@${it.seam}" },
+            800L, top.endMs - top.startMs
+        )
+    }
+
+    /**
+     * A single blinking cell on a static screen: one cell of 48 changes,
+     * so a whole-grid mean stays under the motion gate and every seam
+     * reads ~1.0. Motion weighting must still find the real 400ms
+     * period instead of missing the loop or matching an arbitrary span.
+     */
+    @Test
+    fun smallAnimatedRegionIsDetectedAtItsRealPeriod() {
+        val frames = (0 until 30).map { k ->
+            val luma = ByteArray(w * h) { 20 }
+            if (k % 2 == 0) luma[3 * w + 5] = 220.toByte()
+            LoopFinder.Frame(k * 200L, w, h, luma)
+        }
+        val result = LoopFinder.find(frames)
+        assertTrue("expected the blinking cell's loop", result.candidates.isNotEmpty())
+        val top = result.candidates.first()
+        assertEquals(400L, top.endMs - top.startMs)
+        assertTrue("seam ${top.seam} too low", top.seam >= 0.99)
+    }
+
+    /**
+     * A slow small oscillation (below the motion gate per step) with a
+     * single bright spike elsewhere: the spike is one-off codec-style
+     * flicker and must not capture the weights, and the accumulated
+     * drift must still register as motion so the real 1.6s period is
+     * found.
+     */
+    @Test
+    fun slowSmallRegionWinsOverOneOffSpike() {
+        val frames = (0 until 30).map { k ->
+            val luma = ByteArray(w * h) { 20 }
+            // Triangle wave on two cells, 4 luma units per step (below
+            // the motion gate per step), period 8.
+            val phase = k % 8
+            val v = 60 + (if (phase < 4) phase else 8 - phase) * 4
+            luma[2 * w + 3] = v.toByte()
+            luma[2 * w + 4] = v.toByte()
+            if (k == 7) luma[0] = 200.toByte() // one-off spike
+            LoopFinder.Frame(k * 200L, w, h, luma)
+        }
+        val result = LoopFinder.find(frames)
+        assertTrue("expected the slow oscillation's loop", result.candidates.isNotEmpty())
+        val top = result.candidates.first()
+        assertEquals(1600L, top.endMs - top.startMs)
+        assertTrue("seam ${top.seam} too low", top.seam >= 0.98)
+    }
+
     @Test
     fun staticScreenIsNotALoop() {
         val frames = (0 until 25).map { k -> frameAt(k * 200L, blockCol = 0) }
@@ -75,6 +171,23 @@ class LoopFinderTest {
         }
         val result = LoopFinder.find(frames)
         assertTrue(result.candidates.isEmpty())
+    }
+
+    /**
+     * The blinking cell sits in a masked bar row: it must not count as
+     * activity at all, so the screen reads as static and no loop is
+     * found.
+     */
+    @Test
+    fun maskedBarMotionIsNotActivity() {
+        val frames = (0 until 30).map { k ->
+            val luma = ByteArray(w * h) { 20 }
+            if (k % 2 == 0) luma[5] = 220.toByte()
+            LoopFinder.Frame(k * 200L, w, h, luma, skipTopRows = 1)
+        }
+        val result = LoopFinder.find(frames)
+        assertTrue(result.candidates.isEmpty())
+        assertNull(result.bestEffort)
     }
 
     @Test
@@ -95,11 +208,28 @@ class LoopFinderTest {
             frameAt(
                 k * 200L,
                 blockCol = k % 4,
-                fill = 20 + (k % 7)
+                // Drift scaled above the activity floor so it counts as
+                // real motion: the return poses stay close but never identical.
+                fill = 20 + (k % 7) * 4
             )
         }
         val result = LoopFinder.find(frames, seamThreshold = 0.999)
         assertTrue(result.candidates.isEmpty())
         assertTrue("expected a best-effort guess", result.bestEffort != null)
+    }
+
+    @Test
+    fun refinedAliasDoesNotOutrankTrueSeam() {
+        // Emulator evidence (run 44669842490): a coarse top that only
+        // looked seamless at 5 fps scored 0.88 when refined at 20 fps,
+        // yet stayed first over true 0.9999 cycles. Re-ranking with the
+        // refined score must drop it behind them.
+        val alias = LoopFinder.Candidate(1800, 2200, 0.8801867789180363)
+        val trueA = LoopFinder.Candidate(3400, 4800, 0.9999658251100004)
+        val trueB = LoopFinder.Candidate(5000, 6400, 0.9999658251100004)
+        val ranked = LoopFinder.rankCandidates(listOf(alias, trueA, trueB), 3)
+        assertEquals(trueA, ranked[0])
+        assertEquals(trueB, ranked[1])
+        assertEquals(alias, ranked[2])
     }
 }
