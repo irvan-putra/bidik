@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bidik loop and GIF maker</title>
+<style>
+:root{color-scheme:light dark;--bg:#f3f6f6;--fg:#142022;--card:#fff;--ac:#0d7a85;--mut:#586a6d;--bd:#d3dcde}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1719;--fg:#e4eced;--card:#182224;--ac:#4cc9d6;--mut:#94a8ab;--bd:#2a3a3d}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:760px;margin:0 auto;padding:16px}.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin:12px 0}
+video{width:100%;max-height:50vh;background:#000;border-radius:8px}
+button,label.btn{display:inline-block;background:var(--ac);color:#fff;border:0;border-radius:8px;padding:9px 13px;font:inherit;cursor:pointer;margin:4px 6px 0 0}@media(prefers-color-scheme:dark){button,label.btn{color:#04181b}}
+button.alt{background:var(--mut)}button:disabled{opacity:.45}input[type=file]{display:none}
+input[type=number]{font:inherit;width:6.5em;padding:6px;border-radius:8px;border:1px solid var(--bd);background:var(--bg);color:var(--fg)}
+.mut{color:var(--mut);font-size:.9em}a{color:var(--ac)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}img{max-width:100%;border-radius:8px}
+</style></head><body><main>
+<h1>Bidik loop and GIF maker</h1>
+<p>Pick a screen recording from your device. This page looks for a stretch that plays as a seamless loop, lets you trim it by hand, and exports it as a looping GIF. It is the loop-and-GIF part of the Bidik Android app, re-written for the browser.</p>
+<p class="mut">The video stays on your device: nothing is uploaded. It does not capture web pages or record the screen; that stays in the Android app, where it uses the phone's own WebView and screen-recording consent. This version is a separate JavaScript reimplementation of Bidik's loop search and GIF writer, tested on synthetic clips only. It is not verified to match the Android build, and neither one is validated on a real phone yet. GIFs are capped at 20 s, use a fixed 216-colour palette with dithering, and a long clip is analysed only for its first 80 s.</p>
+<div class="card"><label class="btn">Choose a video<input id="f" type="file" accept="video/*"></label><span id="fn" class="mut"></span>
+<video id="v" controls playsinline muted preload="auto" style="margin-top:8px" hidden></video>
+<div class="row"><label>Ignore top <input id="mt" type="number" min="0" max="40" value="0"> %</label><label>bottom <input id="mb" type="number" min="0" max="40" value="0"> %</label></div>
+<p class="mut">Use these when a status or navigation bar changes during the clip (a clock, for example), so it does not affect the match.</p>
+<button id="an" disabled>Find loops</button> <span id="ast" class="mut"></span></div>
+<div class="card" id="res" hidden><h2>Loop</h2><div id="cands"></div><p id="note" class="mut"></p>
+<div class="row"><label>Start <input id="s" type="number" step="0.05" min="0"> s</label><label>End <input id="e" type="number" step="0.05" min="0"> s</label><button id="pv" class="alt">Preview loop</button></div>
+<p class="mut">Manual trim: type your own start and end. The search is a suggestion, not a promise of a perfect loop.</p>
+<div class="row"><label>fps <input id="fps" type="number" min="2" max="20" value="10"></label><label>max width <input id="mw" type="number" min="120" max="960" value="480"></label>
+<button id="ex">Export GIF</button></div><p id="xst" class="mut"></p><div id="out"></div></div>
+<p class="mut"><a href="https://github.com/irvan-putra/bidik">Source</a> · <a href="https://github.com/irvan-putra/bidik/releases">Android app</a></p>
+<script src="loop.js"></script><script src="app.js"></script></main></body></html>
