@@ -170,6 +170,9 @@ class TrimTimelineView @JvmOverloads constructor(
 
     fun selection(): TrimSelection? = selection
 
+    /** Loaded thumbnail slots; internal for host tests. */
+    internal fun loadedSlots(): Int = slotCount
+
     /** Loop-candidate tap: fill the handles. */
     fun setSpan(startMs: Long, endMs: Long) {
         selection?.setSpan(startMs, endMs)
