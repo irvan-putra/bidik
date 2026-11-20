@@ -197,7 +197,7 @@ internal class AppAudioRecorder(
                     val videoStart = waitForVideoStart()
                     basePtsUs = (System.nanoTime() - videoStart) / 1_000L
                 }
-                mix(gameBuf, micBuf, mixed)
+                mixPcm(gameBuf, micBuf, mixed)
                 val ptsUs = basePtsUs + framesEncoded * 1_000_000L / SAMPLE_RATE
                 if (!encodeChunk(mixed, ptsUs, eos = false)) break
                 framesEncoded += FRAMES
@@ -254,22 +254,7 @@ internal class AppAudioRecorder(
         return true
     }
 
-    /** Game sound (stereo) plus mic (mono) summed with clamping. */
-    private fun mix(game: ShortArray?, mic: ShortArray?, out: ShortArray) {
-        for (i in 0 until FRAMES) {
-            val gl = game?.get(i * 2)?.toInt() ?: 0
-            val gr = game?.get(i * 2 + 1)?.toInt() ?: 0
-            val m = mic?.get(i)?.toInt() ?: 0
-            out[i * 2] = clampPcm(gl + m)
-            out[i * 2 + 1] = clampPcm(gr + m)
-        }
-    }
 
-    private fun clampPcm(value: Int): Short = when {
-        value > Short.MAX_VALUE -> Short.MAX_VALUE
-        value < Short.MIN_VALUE -> Short.MIN_VALUE
-        else -> value.toShort()
-    }
 
     /** Queues one input buffer; false when the encoder is done or broken. */
     private fun encodeChunk(pcm: ShortArray, ptsUs: Long, eos: Boolean): Boolean {
@@ -363,5 +348,26 @@ internal class AppAudioRecorder(
         private const val FRAME_BYTES = FRAMES * 2 * 2
         private const val MIC_FRAME_BYTES = FRAMES * 2
         private const val DRAIN_TIMEOUT_NS = 3_000_000_000L
+
+        /**
+         * Game sound (stereo) plus mic (mono) summed with clamping.
+         * Internal so the JVM fixture can drive it with synthetic PCM;
+         * that verifies mix math only, never real microphone signal.
+         */
+        internal fun mixPcm(game: ShortArray?, mic: ShortArray?, out: ShortArray) {
+            for (i in 0 until FRAMES) {
+                val gl = game?.get(i * 2)?.toInt() ?: 0
+                val gr = game?.get(i * 2 + 1)?.toInt() ?: 0
+                val m = mic?.get(i)?.toInt() ?: 0
+                out[i * 2] = clampPcm(gl + m)
+                out[i * 2 + 1] = clampPcm(gr + m)
+            }
+        }
+
+        private fun clampPcm(value: Int): Short = when {
+            value > Short.MAX_VALUE -> Short.MAX_VALUE
+            value < Short.MIN_VALUE -> Short.MIN_VALUE
+            else -> value.toShort()
+        }
     }
 }
