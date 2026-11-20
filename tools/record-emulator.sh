@@ -78,6 +78,10 @@ echo "== build app + test APKs (host, x86_64 emulator variant) =="
 
 echo "== instrumented record run =="
 install_pair_with_retry
+# The game-sound test needs the RECORD_AUDIO runtime grant (Android
+# requires it for playback capture too); granted here so the run stays
+# deterministic instead of clicking the system permission dialog.
+adb shell pm grant com.vanipy.bidik android.permission.RECORD_AUDIO
 set +e
 timeout -k 30 900 adb shell "am instrument -w -e class com.vanipy.bidik.ScreenRecordTest com.vanipy.bidik.test/androidx.test.runner.AndroidJUnitRunner" > /tmp/record-instrument.log 2>&1
 irc=$?
