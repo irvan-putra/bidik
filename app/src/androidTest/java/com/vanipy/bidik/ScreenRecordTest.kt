@@ -557,6 +557,7 @@ class ScreenRecordTest {
     fun gameSoundAndMotionAreCaptured() {
         RecordOptions.setSoundEnabled(context, true)
         RecordOptions.setMotionEnabled(context, true)
+        val before = recordingsPresent()
         val tone = TestTone()
         startConsentedRecording()
         val stop = waitForStopControl()
@@ -565,7 +566,7 @@ class ScreenRecordTest {
         tone.stop()
         stop.click()
 
-        val recording = waitForRecording(30_000)
+        val recording = waitForRecording(30_000, before)
         assertNotNull("no saved recording after stop: " + windowDump(), recording)
 
         val retriever = MediaMetadataRetriever()
@@ -610,18 +611,23 @@ class ScreenRecordTest {
     @Test
     fun motionOverlayRespondsToMovement() {
         RecordOptions.setMotionEnabled(context, true)
+        val before = recordingsPresent()
         startConsentedRecording()
         val stop = waitForStopControl()
         Thread.sleep(2_000)
         val trace = ScreenRecordService.activeMotionTrace
         assertNotNull("motion trace not live during recording", trace)
-        repeat(50) {
+        // Fast enough to dominate the real sensor stream: the emulator
+        // pushes its static accelerometer at ~50Hz, and each real sample
+        // decays the injected tilt/energy by 0.8 (run 44679335893: 25Hz
+        // injection landed a barely-visible 6px shift).
+        repeat(200) {
             trace!!.onSample(6f, 6f, 15f)
-            Thread.sleep(40)
+            Thread.sleep(10)
         }
         stop.click()
 
-        val recording = waitForRecording(30_000)
+        val recording = waitForRecording(30_000, before)
         assertNotNull("no saved recording after stop: " + windowDump(), recording)
         recording!!.copyTo(
             java.io.File(evidenceDir(), recording.name),

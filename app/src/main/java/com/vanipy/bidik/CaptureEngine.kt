@@ -322,6 +322,17 @@ internal class CaptureEngine(
         val r = DOT_RADIUS +
             (trace.energy / ENERGY_FULL).coerceIn(0f, 1f) * DOT_GROW
         val rx = r * encodeHeight.toFloat() / width
+        // Dark halo under the light dot: a light-only dot vanishes on
+        // bright content (run 44679335893: 6px move invisible on the
+        // app's light background, region diff 0.05).
+        drawDot(cx, cy, r * 1.45f, rx * 1.45f, 0f, 0f, 0f, 0.6f)
+        drawDot(cx, cy, r, rx, 1f, 1f, 1f, 0.85f)
+    }
+
+    private fun drawDot(
+        cx: Float, cy: Float, r: Float, rx: Float,
+        cr: Float, cg: Float, cb: Float, ca: Float
+    ) {
         val verts = dotBuffer.asFloatBuffer()
         verts.clear()
         verts.put(cx).put(cy)
@@ -334,7 +345,7 @@ internal class CaptureEngine(
         GLES20.glUseProgram(overlayProgram)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-        GLES20.glUniform4f(oColor, 1f, 1f, 1f, 0.75f)
+        GLES20.glUniform4f(oColor, cr, cg, cb, ca)
         GLES20.glEnableVertexAttribArray(oPos)
         GLES20.glVertexAttribPointer(oPos, 2, GLES20.GL_FLOAT, false, 0, verts)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_FAN, 0, DOT_VERTICES)
