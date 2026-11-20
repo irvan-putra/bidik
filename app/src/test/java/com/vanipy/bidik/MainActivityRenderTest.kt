@@ -140,6 +140,10 @@ class MainActivityRenderTest {
         assertTrue("delete must ask for confirmation first", dialog != null)
         assertTrue("file must survive opening the dialog", mp4.exists())
         dialog!!.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
+        // AlertDialog dispatches button clicks through a Handler message;
+        // under Robolectric's paused looper the delete has not run until
+        // the main looper is idled.
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         assertTrue("confirmed delete must remove the file", !mp4.exists())
         mp4.delete()
     }
