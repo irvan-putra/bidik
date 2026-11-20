@@ -421,8 +421,17 @@ class ScreenRecordTest {
             r.release()
             d
         }
-        val seamA = frameAt(recording, top.startMs * 1000L)
-        val seamB = frameAt(recording, top.endMs * 1000L)
+        // OPTION_CLOSEST, not the sync-frame default: the encoder
+        // keyframes once a second, so CLOSEST_SYNC can return frames a
+        // second away from the endpoints and fail a correct loop (run
+        // 44671971209: MAD 19 on a verified exact loop, MAD 0.01 with
+        // accurate extraction).
+        val seamA = frameAt(
+            recording, top.startMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        val seamB = frameAt(
+            recording, top.endMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST
+        )
         assertNotNull("no frame at loop start", seamA)
         assertNotNull("no frame at loop end", seamB)
         saveEvidenceBitmap("loop-seam-start.png", seamA!!)
