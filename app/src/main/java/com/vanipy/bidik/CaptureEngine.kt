@@ -39,7 +39,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Fixed-cadence feeding keeps the video timeline equal to real elapsed
  * time through motionless stretches, including the final moment.
  *
- * Encoded samples go to a MediaMuxer (MP4). No audio track.
+ * Encoded samples go to a MediaMuxer (MP4). An optional
+ * [AppAudioRecorder] adds an AAC track; the muxer then starts only once
+ * both tracks are registered, and writes from the video and audio
+ * threads are serialized through [MuxSink].
  *
  * Threading: everything GL/codec lives on one private thread. prepare,
  * startFeeding and stop marshal onto it and block briefly for the
@@ -76,7 +79,7 @@ internal class CaptureEngine(
     private var codecInput: Surface? = null
     private var encoder: MediaCodec? = null
     private var muxer: MediaMuxer? = null
-    private var muxerStarted = false
+    @Volatile private var muxerStarted = false
     private var trackIndex = -1
     private var surfaceTexture: SurfaceTexture? = null
 
@@ -90,11 +93,95 @@ internal class CaptureEngine(
     private var aTex = -1
     private var uTexMatrix = -1
     private val texMatrix = FloatArray(16)
+    private var overlayProgram = 0
+    private var oPos = -1
+    private var oColor = -1
+    private val dotBuffer = ByteBuffer.allocateDirect(DOT_VERTICES * 2 * 4)
+        .order(ByteOrder.nativeOrder())
     private var haveTexture = false
     private var feeding = false
     private var released = false
     private var framesWritten = 0L
-    private var startNanos = -1L
+    @Volatile private var startNanos = -1L
+
+    /** Timestamp of the video track's first frame, -1 until drawn. */
+    internal val firstFrameNanos: Long get() = startNanos
+
+    /**
+     * Optional audio side, attached by the service after [prepare] and
+     * before [startFeeding]. Attaching it makes the muxer wait for the
+     * audio track before starting.
+     */
+    internal var audioRecorder: AppAudioRecorder? = null
+        set(value) {
+            field = value
+            synchronized(muxLock) { expectedTracks = if (value != null) 2 else 1 }
+        }
+
+    /**
+     * Optional motion overlay, attached by the service when the motion
+     * option is on: a dot drawn into every frame that drifts with tilt
+     * and grows with movement energy.
+     */
+    internal var motionTrace: MotionTrace? = null
+
+    private val muxLock = Any()
+    private var expectedTracks = 1
+    private var tracksAdded = 0
+
+    /**
+     * Serialized access to the muxer from the video and audio threads.
+     * The muxer starts when every expected track is registered; samples
+     * offered before that are dropped by returning false.
+     */
+    internal interface MuxSink {
+        fun muxAddTrack(format: MediaFormat): Int
+        fun muxWriteSample(track: Int, buffer: ByteBuffer, info: MediaCodec.BufferInfo): Boolean
+    }
+
+    internal val muxSink: MuxSink = object : MuxSink {
+        override fun muxAddTrack(format: MediaFormat): Int = addTrackLocked(format)
+        override fun muxWriteSample(
+            track: Int,
+            buffer: ByteBuffer,
+            info: MediaCodec.BufferInfo
+        ): Boolean {
+            synchronized(muxLock) {
+                val mux = muxer
+                if (!muxerStarted || mux == null) return false
+                mux.writeSampleData(track, buffer, info)
+                return true
+            }
+        }
+    }
+
+    private fun addTrackLocked(format: MediaFormat): Int {
+        synchronized(muxLock) {
+            val mux = muxer ?: return -1
+            val index = mux.addTrack(format)
+            tracksAdded++
+            if (tracksAdded >= expectedTracks && !muxerStarted) {
+                mux.start()
+                muxerStarted = true
+            }
+            return index
+        }
+    }
+
+    /**
+     * Audio failed to start or ran into trouble: the recording continues
+     * video-only, so the muxer no longer waits for an audio track.
+     */
+    internal fun dropAudioExpectation() {
+        synchronized(muxLock) {
+            expectedTracks = 1
+            val mux = muxer
+            if (tracksAdded >= 1 && !muxerStarted && mux != null) {
+                mux.start()
+                muxerStarted = true
+            }
+        }
+    }
 
     private val vertexBuffer = floatBufferOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
     private val texBuffer = floatBufferOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
@@ -118,9 +205,27 @@ internal class CaptureEngine(
         await { setup() }
     }
 
-    /** Begins feeding frames at a fixed cadence. */
+    /** True when attached audio failed to start; recording went video-only. */
+    internal var audioFailed = false
+        private set
+
+    /**
+     * Begins feeding frames at a fixed cadence. An attached audio side
+     * that fails to start is dropped, not fatal: the recording continues
+     * video-only and [audioFailed] tells the service to say so.
+     */
     fun startFeeding() {
         await {
+            val audio = audioRecorder
+            if (audio != null) {
+                try {
+                    audio.start()
+                } catch (_: Exception) {
+                    audioRecorder = null
+                    audioFailed = true
+                    dropAudioExpectation()
+                }
+            }
             feeding = true
             handler.post(tick)
         }
@@ -197,10 +302,68 @@ internal class CaptureEngine(
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glDisableVertexAttribArray(aPos)
         GLES20.glDisableVertexAttribArray(aTex)
+        drawMotionOverlay()
         val now = System.nanoTime()
         if (startNanos < 0) startNanos = now
         EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, now - startNanos)
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+    }
+
+    /**
+     * Draws the motion dot on top of the frame: bottom-right, semi-
+     * transparent, drifting with smoothed tilt and growing with
+     * movement energy, so a viewer sees the phone being moved without
+     * any numbers on screen.
+     */
+    private fun drawMotionOverlay() {
+        val trace = motionTrace ?: return
+        val cx = (DOT_X - trace.tiltX * TILT_SHIFT).coerceIn(-0.95f, 0.95f)
+        val cy = (DOT_Y + trace.tiltY * TILT_SHIFT).coerceIn(-0.95f, 0.95f)
+        val r = DOT_RADIUS +
+            (trace.energy / ENERGY_FULL).coerceIn(0f, 1f) * DOT_GROW
+        val rx = r * encodeHeight.toFloat() / width
+        // Dark halo under the light dot: a light-only dot vanishes on
+        // bright content (run 44679335893: 6px move invisible on the
+        // app's light background, region diff 0.05).
+        drawDot(cx, cy, r * 1.45f, rx * 1.45f, 0f, 0f, 0f, 0.6f)
+        drawDot(cx, cy, r, rx, 1f, 1f, 1f, 0.85f)
+    }
+
+    private fun drawDot(
+        cx: Float, cy: Float, r: Float, rx: Float,
+        cr: Float, cg: Float, cb: Float, ca: Float
+    ) {
+        val verts = dotBuffer.asFloatBuffer()
+        verts.clear()
+        verts.put(cx).put(cy)
+        for (i in 0..DOT_SEGMENTS) {
+            val angle = (Math.PI * 2 * i / DOT_SEGMENTS).toFloat()
+            verts.put(cx + rx * kotlin.math.cos(angle))
+            verts.put(cy + r * kotlin.math.sin(angle))
+        }
+        verts.position(0)
+        GLES20.glUseProgram(overlayProgram)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glUniform4f(oColor, cr, cg, cb, ca)
+        GLES20.glEnableVertexAttribArray(oPos)
+        GLES20.glVertexAttribPointer(oPos, 2, GLES20.GL_FLOAT, false, 0, verts)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_FAN, 0, DOT_VERTICES)
+        GLES20.glDisableVertexAttribArray(oPos)
+        GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    private fun buildOverlayProgram(): Int {
+        val vertex = compileShader(GLES20.GL_VERTEX_SHADER, OVERLAY_VERTEX_SHADER)
+        val fragment = compileShader(GLES20.GL_FRAGMENT_SHADER, OVERLAY_FRAGMENT_SHADER)
+        val prog = GLES20.glCreateProgram()
+        GLES20.glAttachShader(prog, vertex)
+        GLES20.glAttachShader(prog, fragment)
+        GLES20.glLinkProgram(prog)
+        val ok = IntArray(1)
+        GLES20.glGetProgramiv(prog, GLES20.GL_LINK_STATUS, ok, 0)
+        check(ok[0] != 0) { "overlay shader link failed" }
+        return prog
     }
 
     /**
@@ -239,6 +402,13 @@ internal class CaptureEngine(
             sawEos = drainEncoder(expectEos = true)
         } catch (_: Exception) {
         }
+        // Audio drains before the muxer closes so its tail reaches the
+        // file; the video result alone decides whether the clip is kept.
+        try {
+            audioRecorder?.stopDrain(save)
+        } catch (_: Exception) {
+        }
+        audioRecorder = null
         val wroteFrames = framesWritten > 0
         var muxerOk = false
         if (muxerStarted) {
@@ -265,10 +435,8 @@ internal class CaptureEngine(
                     if (System.nanoTime() > deadline) return false
                 }
                 index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    val mux = muxer ?: return false
-                    trackIndex = mux.addTrack(enc.outputFormat)
-                    mux.start()
-                    muxerStarted = true
+                    trackIndex = addTrackLocked(enc.outputFormat)
+                    if (trackIndex < 0) return false
                 }
                 index >= 0 -> {
                     val buffer = enc.getOutputBuffer(index)
@@ -278,7 +446,9 @@ internal class CaptureEngine(
                     ) {
                         buffer.position(info.offset)
                         buffer.limit(info.offset + info.size)
-                        muxer?.writeSampleData(trackIndex, buffer, info)
+                        synchronized(muxLock) {
+                            if (muxerStarted) muxer?.writeSampleData(trackIndex, buffer, info)
+                        }
                         framesWritten++
                     }
                     enc.releaseOutputBuffer(index, false)
@@ -331,6 +501,12 @@ internal class CaptureEngine(
         }
         muxer = null
         muxerStarted = false
+        try {
+            audioRecorder?.releaseQuietly()
+        } catch (_: Exception) {
+        }
+        audioRecorder = null
+        motionTrace = null
     }
 
     private fun setupGl(surface: Surface) {
@@ -372,6 +548,9 @@ internal class CaptureEngine(
         aPos = GLES20.glGetAttribLocation(program, "aPos")
         aTex = GLES20.glGetAttribLocation(program, "aTex")
         uTexMatrix = GLES20.glGetUniformLocation(program, "uTexMatrix")
+        overlayProgram = buildOverlayProgram()
+        oPos = GLES20.glGetAttribLocation(overlayProgram, "aPos")
+        oColor = GLES20.glGetUniformLocation(overlayProgram, "uColor")
 
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
@@ -442,6 +621,29 @@ internal class CaptureEngine(
         private const val FRAME_INTERVAL_MS = 33L
         private const val EGL_RECORDABLE_ANDROID = 0x3142
         private const val DRAIN_TIMEOUT_NS = 3_000_000_000L
+
+        // Motion overlay dot: rest position, size and growth in NDC.
+        private const val DOT_X = 0.82f
+        private const val DOT_Y = -0.84f
+        private const val DOT_RADIUS = 0.030f
+        private const val DOT_GROW = 0.045f
+        private const val TILT_SHIFT = 0.025f
+        private const val ENERGY_FULL = 8f
+        private const val DOT_SEGMENTS = 16
+        private const val DOT_VERTICES = DOT_SEGMENTS + 2
+
+        private const val OVERLAY_VERTEX_SHADER =
+            "attribute vec4 aPos;\n" +
+                "void main() {\n" +
+                "    gl_Position = aPos;\n" +
+                "}\n"
+
+        private const val OVERLAY_FRAGMENT_SHADER =
+            "precision mediump float;\n" +
+                "uniform vec4 uColor;\n" +
+                "void main() {\n" +
+                "    gl_FragColor = uColor;\n" +
+                "}\n"
 
         private const val VERTEX_SHADER =
             "uniform mat4 uTexMatrix;\n" +

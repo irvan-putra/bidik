@@ -1,5 +1,6 @@
 package com.vanipy.bidik
 
+import android.Manifest
 import android.app.Activity
 import android.app.Notification
 import android.app.NotificationChannel
@@ -8,6 +9,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -20,6 +22,7 @@ import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import java.io.File
 
 /**
@@ -37,9 +40,17 @@ import java.io.File
  * CaptureEngine, which feeds a MediaCodec encoder at a fixed cadence
  * with wall-clock timestamps (see its KDoc). Fixed-cadence feeding keeps
  * the video timeline equal to real elapsed time even while the screen is
- * still, which direct MediaRecorder feeding does not. No microphone: no
- * audio track is encoded, so RECORD_AUDIO is not requested and
- * recordings are silent.
+ * still, which direct MediaRecorder feeding does not.
+ *
+ * Optional extras, each off until the user turns it on (RecordOptions):
+ * app sound records internal audio via AudioPlaybackCapture and/or the
+ * microphone, mixed into one AAC track (both need the RECORD_AUDIO
+ * runtime grant; the mic source is opened only for the mic option);
+ * the motion option records an accelerometer CSV next to the MP4 and
+ * draws a live motion dot into the video. When a wanted sound source
+ * cannot start - permission declined, device too old, capture refused -
+ * the recording continues video-only and says so in the notification
+ * and status broadcast; it never fails silently.
  *
  * Files: the encoder writes a partial file in the app-private cache dir;
  * only after a clean stop is it moved into the recordings dir. The
@@ -72,6 +83,7 @@ class ScreenRecordService : Service() {
         const val EXTRA_STATE = "state"
         const val EXTRA_FILE = "file"
         const val EXTRA_REMAINING_SEC = "remainingSec"
+        const val EXTRA_SOUND_MISSING = "soundMissing"
         const val STATE_STARTING = "starting"
         const val STATE_RECORDING = "recording"
         const val STATE_SAVED = "saved"
@@ -82,6 +94,14 @@ class ScreenRecordService : Service() {
 
         @Volatile
         internal var active = false
+            private set
+
+        // Test-only handle: instrumentation runs in this process and
+        // drives the live overlay through the same onSample the sensor
+        // feeds. Not an exported command or intent; the injection
+        // itself lives entirely in the test source.
+        @Volatile
+        internal var activeMotionTrace: MotionTrace? = null
             private set
     }
 
@@ -95,6 +115,10 @@ class ScreenRecordService : Service() {
     private var cleanedUp = false
     private var autoStopSec = 0
     private var delaySec = 0
+    private var audioWanted = false
+    private var motionLog: MotionLog? = null
+    private var motionPartial: File? = null
+    private var motionTarget: File? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -205,6 +229,48 @@ class ScreenRecordService : Service() {
             return
         }
         virtualDisplay = vd
+
+        // Optional audio: app sound and/or mic, mixed to one AAC track.
+        // Attached before feeding starts so the muxer waits for the
+        // audio track; any failure here means video-only, said visibly.
+        val soundOn = RecordOptions.soundEnabled(this)
+        val micOn = RecordOptions.micEnabled(this)
+        audioWanted = soundOn || micOn
+        if (audioWanted && ContextCompat.checkSelfPermission(
+                this, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            try {
+                val recorder = AppAudioRecorder(
+                    projection = if (soundOn) mp else null,
+                    micEnabled = micOn,
+                    sink = eng.muxSink,
+                    videoStartNanos = { eng.firstFrameNanos }
+                )
+                recorder.prepare()
+                eng.audioRecorder = recorder
+            } catch (e: Exception) {
+                DiagLog.log(this, "record", "audio_unavailable",
+                    detail = "category=" + DiagLog.errorCategory(e))
+            }
+        }
+
+        // Optional motion capture: an accelerometer sidecar CSV next to
+        // the saved MP4, plus the live dot drawn into the video itself.
+        if (RecordOptions.motionEnabled(this)) {
+            val target = File(
+                RecordingStore.dir(this),
+                file.nameWithoutExtension + ".motion.csv"
+            )
+            val partial = File(cacheDir, target.name + ".part")
+            val log = MotionLog(this, partial) { eng.firstFrameNanos }
+            motionLog = log
+            motionTarget = target
+            motionPartial = partial
+            eng.motionTrace = log.trace
+            activeMotionTrace = log.trace
+        }
+
         // The session is live from here: the stop control appears and a
         // second start is refused. The encoder feed itself may still wait
         // out the start delay.
@@ -242,7 +308,23 @@ class ScreenRecordService : Service() {
             return
         }
         started = true
-        updateNotification("Local only. Stop from here or from the app.", "Stop")
+        val audioMissing = audioWanted && (eng.audioRecorder == null || eng.audioFailed)
+        if (audioMissing) {
+            DiagLog.log(this, "record", "audio_unavailable", detail = "category=not_granted")
+        }
+        val motion = motionLog
+        if (motion != null && !motion.start()) {
+            motionLog = null
+            DiagLog.log(this, "record", "motion_unavailable")
+        }
+        val note = when {
+            audioMissing ->
+                "Recording without the sound you chose - local only. Stop here or in the app."
+            audioWanted ->
+                "Recording screen + sound - local only. Stop here or in the app."
+            else -> "Local only. Stop from here or from the app."
+        }
+        updateNotification(note, "Stop")
         val capMs = if (autoStopSec > 0) {
             autoStopSec * 1_000L
         } else {
@@ -250,9 +332,15 @@ class ScreenRecordService : Service() {
         }
         handler.postDelayed({ cleanup(save = true, failed = false) }, capMs)
         val bars = if (RecordOptions.barsHidden(this)) "hidden" else "shown"
+        val sound = when {
+            audioMissing -> "unavailable"
+            audioWanted -> "on"
+            else -> "off"
+        }
         DiagLog.log(this, "record", "start",
-            detail = "delay=$delaySec autostop=$autoStopSec bars=$bars")
-        broadcastStatus(STATE_RECORDING, null)
+            detail = "delay=$delaySec autostop=$autoStopSec bars=$bars " +
+                "sound=$sound motion=${motionLog != null}")
+        broadcastStatus(STATE_RECORDING, null, soundMissing = audioMissing)
     }
 
     @Synchronized
@@ -283,6 +371,28 @@ class ScreenRecordService : Service() {
         } catch (_: Exception) {
         }
         projection = null
+        // The motion sidecar stops with the session and only a saved
+        // recording keeps it, moved next to its MP4.
+        val motion = motionLog
+        motionLog = null
+        activeMotionTrace = null
+        val mPartial = motionPartial
+        val mTarget = motionTarget
+        motionPartial = null
+        motionTarget = null
+        if (motion != null) {
+            val motionSaved = motion.stop(save = usable && !failed) &&
+                mPartial != null && mTarget != null && moveTo(mPartial, mTarget)
+            if (motionSaved) {
+                DiagLog.log(this, "record", "motion_saved")
+            } else {
+                try {
+                    mPartial?.delete()
+                } catch (_: Exception) {
+                }
+            }
+        }
+        audioWanted = false
         started = false
         active = false
         RecordingStore.clearActive(this)
@@ -367,12 +477,18 @@ class ScreenRecordService : Service() {
         nm.notify(NOTIFICATION_ID, buildNotification(text, actionLabel))
     }
 
-    private fun broadcastStatus(state: String, fileName: String?, remainingSec: Int = -1) {
+    private fun broadcastStatus(
+        state: String,
+        fileName: String?,
+        remainingSec: Int = -1,
+        soundMissing: Boolean = false
+    ) {
         val intent = Intent(ACTION_STATUS)
             .setPackage(packageName)
             .putExtra(EXTRA_STATE, state)
         if (fileName != null) intent.putExtra(EXTRA_FILE, fileName)
         if (remainingSec >= 0) intent.putExtra(EXTRA_REMAINING_SEC, remainingSec)
+        if (soundMissing) intent.putExtra(EXTRA_SOUND_MISSING, true)
         sendBroadcast(intent)
     }
 

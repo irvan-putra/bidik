@@ -6,6 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.os.Build
 import androidx.test.core.app.ActivityScenario
@@ -85,6 +88,9 @@ class ScreenRecordTest {
         RecordOptions.setDelaySeconds(context, 0)
         RecordOptions.setAutoStopSeconds(context, 0)
         RecordOptions.setBarsHidden(context, false)
+        RecordOptions.setSoundEnabled(context, false)
+        RecordOptions.setMicEnabled(context, false)
+        RecordOptions.setMotionEnabled(context, false)
     }
 
     @After
@@ -535,6 +541,245 @@ class ScreenRecordTest {
             "best-effort guess seam ${guess?.seam} at or above the confident bar",
             guess == null || guess.seam < 0.90
         )
+    }
+
+    /**
+     * The sound options produce real captured audio: with game sound
+     * on, a loud sine played by the test app (USAGE_MEDIA, capturable
+     * by policy) must land in the MP4 as a non-silent AAC track, and
+     * the motion option must leave a populated .motion.csv sidecar.
+     * RECORD_AUDIO is granted by the runner script; the emulator runs
+     * with its audio backend on (the workflow no longer passes
+     * -noaudio). A silent track here means capture policy or the
+     * emulator backend failed, not a pass.
+     */
+    @Test
+    fun gameSoundAndMotionAreCaptured() {
+        RecordOptions.setSoundEnabled(context, true)
+        RecordOptions.setMotionEnabled(context, true)
+        val before = recordingsPresent()
+        val tone = TestTone()
+        startConsentedRecording()
+        val stop = waitForStopControl()
+        tone.start()
+        Thread.sleep(5_000)
+        tone.stop()
+        stop.click()
+
+        val recording = waitForRecording(30_000, before)
+        assertNotNull("no saved recording after stop: " + windowDump(), recording)
+
+        val retriever = MediaMetadataRetriever()
+        retriever.setDataSource(recording!!.absolutePath)
+        val hasAudio =
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
+        retriever.release()
+        assertEquals("recording has no audio track", "yes", hasAudio)
+
+        val rms = decodeAudioRms(recording)
+        assertNotNull("audio track present but undecodable", rms)
+        assertTrue(
+            "captured audio is silent (RMS $rms); capture policy or emulator backend failed",
+            rms!! > 1_000.0
+        )
+
+        val sidecar = java.io.File(
+            RecordingStore.dir(context),
+            recording.nameWithoutExtension + ".motion.csv"
+        )
+        assertTrue("no motion sidecar next to the recording", sidecar.exists())
+        val rows = sidecar.readLines()
+        assertTrue("motion sidecar too short: ${rows.size} rows", rows.size > 50)
+        assertTrue(
+            "motion sidecar first column is not a ms timestamp: ${rows.first()}",
+            rows.first().substringBefore(',').toLongOrNull() != null
+        )
+        sidecar.copyTo(java.io.File(evidenceDir(), sidecar.name), overwrite = true)
+        recording.copyTo(
+            java.io.File(evidenceDir(), recording.name),
+            overwrite = true
+        )
+    }
+
+    /**
+     * The motion overlay must visibly answer movement, not only fill a
+     * CSV: synthetic samples go through the same MotionTrace.onSample
+     * the sensor feeds (test-only process-local handle, no production
+     * command), and the bottom-right dot region of the saved video
+     * must change against the calm baseline.
+     */
+    @Test
+    fun motionOverlayRespondsToMovement() {
+        RecordOptions.setMotionEnabled(context, true)
+        val before = recordingsPresent()
+        startConsentedRecording()
+        val stop = waitForStopControl()
+        Thread.sleep(2_000)
+        val trace = ScreenRecordService.activeMotionTrace
+        assertNotNull("motion trace not live during recording", trace)
+        // Fast enough to dominate the real sensor stream: the emulator
+        // pushes its static accelerometer at ~50Hz, and each real sample
+        // decays the injected tilt/energy by 0.8 (run 44679335893: 25Hz
+        // injection landed a barely-visible 6px shift).
+        repeat(200) {
+            trace!!.onSample(6f, 6f, 15f)
+            Thread.sleep(10)
+        }
+        stop.click()
+
+        val recording = waitForRecording(30_000, before)
+        assertNotNull("no saved recording after stop: " + windowDump(), recording)
+        recording!!.copyTo(
+            java.io.File(evidenceDir(), recording.name),
+            overwrite = true
+        )
+
+        val calm = frameAt(
+            recording, 1_000_000, MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        val moved = frameAt(
+            recording, 3_500_000, MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        assertNotNull("no calm baseline frame in recording", calm)
+        assertNotNull("no moved frame in recording", moved)
+        saveEvidenceBitmap("overlay-calm.png", calm!!)
+        saveEvidenceBitmap("overlay-moved.png", moved!!)
+        val movedDiff = dotRegionDiff(calm, moved)
+        assertTrue(
+            "motion overlay did not visibly respond (region diff $movedDiff)",
+            movedDiff > 5.0
+        )
+    }
+
+    /** Mean abs diff inside the region the motion dot travels in. */
+    private fun dotRegionDiff(a: Bitmap, b: Bitmap): Double {
+        val w = minOf(a.width, b.width)
+        val h = minOf(a.height, b.height)
+        val x0 = (w * 0.75f).toInt()
+        val y0 = (h * 0.73f).toInt()
+        val ra = Bitmap.createBitmap(a, x0, y0, w - x0, h - y0)
+        val rb = Bitmap.createBitmap(b, x0, y0, w - x0, h - y0)
+        return meanAbsDiff(ra, rb)
+    }
+
+    /**
+     * Decodes the recording's first audio track to PCM and returns its
+     * RMS amplitude, or null when no decodable audio track exists.
+     */
+    private fun decodeAudioRms(file: File): Double? {
+        val extractor = MediaExtractor()
+        extractor.setDataSource(file.absolutePath)
+        var track = -1
+        for (i in 0 until extractor.trackCount) {
+            val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: ""
+            if (mime.startsWith("audio/")) {
+                track = i
+                break
+            }
+        }
+        if (track < 0) {
+            extractor.release()
+            return null
+        }
+        val format = extractor.getTrackFormat(track)
+        val mime = format.getString(MediaFormat.KEY_MIME)!!
+        extractor.selectTrack(track)
+        val decoder = MediaCodec.createDecoderByType(mime)
+        decoder.configure(format, null, null, 0)
+        decoder.start()
+        var sumSquares = 0.0
+        var count = 0L
+        val info = MediaCodec.BufferInfo()
+        var sawEos = false
+        val deadline = System.nanoTime() + 10_000_000_000L
+        while (!sawEos && System.nanoTime() < deadline) {
+            val input = decoder.dequeueInputBuffer(10_000)
+            if (input >= 0) {
+                val buffer = decoder.getInputBuffer(input)!!
+                val size = extractor.readSampleData(buffer, 0)
+                if (size < 0) {
+                    decoder.queueInputBuffer(
+                        input, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                    )
+                } else {
+                    decoder.queueInputBuffer(input, 0, size, extractor.sampleTime, 0)
+                    extractor.advance()
+                }
+            }
+            val output = decoder.dequeueOutputBuffer(info, 10_000)
+            if (output >= 0) {
+                val pcm = decoder.getOutputBuffer(output)
+                if (pcm != null && info.size > 0) {
+                    pcm.order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                    while (pcm.remaining() >= 2) {
+                        val s = pcm.short.toInt()
+                        sumSquares += s.toDouble() * s
+                        count++
+                    }
+                }
+                decoder.releaseOutputBuffer(output, false)
+                if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawEos = true
+            }
+        }
+        decoder.stop()
+        decoder.release()
+        extractor.release()
+        if (count == 0L) return null
+        return kotlin.math.sqrt(sumSquares / count)
+    }
+
+    /**
+     * A loud 440Hz sine on USAGE_MEDIA from the test app: exactly the
+     * kind of playback a consented recorder may capture. MODE_STATIC
+     * with an infinite loop keeps it playing with no feeding thread.
+     */
+    private class TestTone {
+        private var track: android.media.AudioTrack? = null
+
+        fun start() {
+            val frames = SAMPLE_RATE / 2 // 0.5s per loop
+            val pcm = ShortArray(frames) {
+                (Math.sin(2.0 * Math.PI * 440.0 * it / SAMPLE_RATE) * AMPLITUDE).toInt().toShort()
+            }
+            val at = android.media.AudioTrack.Builder()
+                .setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    android.media.AudioFormat.Builder()
+                        .setSampleRate(SAMPLE_RATE)
+                        .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                        .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(pcm.size * 2)
+                .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+                .build()
+            at.write(pcm, 0, pcm.size)
+            at.setLoopPoints(0, frames, -1)
+            at.play()
+            track = at
+        }
+
+        fun stop() {
+            try {
+                track?.stop()
+            } catch (_: Exception) {
+            }
+            try {
+                track?.release()
+            } catch (_: Exception) {
+            }
+            track = null
+        }
+
+        companion object {
+            private const val SAMPLE_RATE = 44_100
+            private const val AMPLITUDE = 20_000
+        }
     }
 
     private fun recordStatusStates(): MutableList<String> {

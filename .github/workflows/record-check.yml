@@ -45,7 +45,10 @@ jobs:
           ram-size: 4096
           target: default
           arch: x86_64
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -dns-server 8.8.8.8,1.1.1.1
+          # Audio stays on: the game-sound test plays a tone and asserts
+          # it lands in the recording; -noaudio would make every capture
+          # silent.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -dns-server 8.8.8.8,1.1.1.1
           script: sh tools/record-emulator.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
