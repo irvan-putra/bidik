@@ -425,8 +425,8 @@ class ScreenRecordTest {
         val seamB = frameAt(recording, top.endMs * 1000L)
         assertNotNull("no frame at loop start", seamA)
         assertNotNull("no frame at loop end", seamB)
-        saveEvidenceBitmap("loop-seam-start.png", seamA)
-        saveEvidenceBitmap("loop-seam-end.png", seamB)
+        saveEvidenceBitmap("loop-seam-start.png", seamA!!)
+        saveEvidenceBitmap("loop-seam-end.png", seamB!!)
         val mad = meanAbsDiff(seamA!!, seamB!!)
         assertTrue("loop endpoints differ on screen (MAD $mad)", mad <= 12.0)
 
