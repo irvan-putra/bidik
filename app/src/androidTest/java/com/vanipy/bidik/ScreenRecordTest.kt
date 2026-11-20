@@ -544,6 +544,66 @@ class ScreenRecordTest {
             rows.first().substringBefore(',').toLongOrNull() != null
         )
         sidecar.copyTo(java.io.File(evidenceDir(), sidecar.name), overwrite = true)
+        recording.copyTo(
+            java.io.File(evidenceDir(), recording.name),
+            overwrite = true
+        )
+    }
+
+    /**
+     * The motion overlay must visibly answer movement, not only fill a
+     * CSV: synthetic samples go through the same MotionTrace.onSample
+     * the sensor feeds (test-only process-local handle, no production
+     * command), and the bottom-right dot region of the saved video
+     * must change against the calm baseline.
+     */
+    @Test
+    fun motionOverlayRespondsToMovement() {
+        RecordOptions.setMotionEnabled(context, true)
+        startConsentedRecording()
+        val stop = waitForStopControl()
+        Thread.sleep(2_000)
+        val trace = ScreenRecordService.activeMotionTrace
+        assertNotNull("motion trace not live during recording", trace)
+        repeat(50) {
+            trace!!.onSample(6f, 6f, 15f)
+            Thread.sleep(40)
+        }
+        stop.click()
+
+        val recording = waitForRecording(30_000)
+        assertNotNull("no saved recording after stop: " + windowDump(), recording)
+        recording!!.copyTo(
+            java.io.File(evidenceDir(), recording.name),
+            overwrite = true
+        )
+
+        val calm = frameAt(
+            recording, 1_000_000, MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        val moved = frameAt(
+            recording, 3_500_000, MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        assertNotNull("no calm baseline frame in recording", calm)
+        assertNotNull("no moved frame in recording", moved)
+        saveEvidenceBitmap("overlay-calm.png", calm!!)
+        saveEvidenceBitmap("overlay-moved.png", moved!!)
+        val movedDiff = dotRegionDiff(calm, moved)
+        assertTrue(
+            "motion overlay did not visibly respond (region diff $movedDiff)",
+            movedDiff > 5.0
+        )
+    }
+
+    /** Mean abs diff inside the region the motion dot travels in. */
+    private fun dotRegionDiff(a: Bitmap, b: Bitmap): Double {
+        val w = minOf(a.width, b.width)
+        val h = minOf(a.height, b.height)
+        val x0 = (w * 0.75f).toInt()
+        val y0 = (h * 0.73f).toInt()
+        val ra = Bitmap.createBitmap(a, x0, y0, w - x0, h - y0)
+        val rb = Bitmap.createBitmap(b, x0, y0, w - x0, h - y0)
+        return meanAbsDiff(ra, rb)
     }
 
     /**

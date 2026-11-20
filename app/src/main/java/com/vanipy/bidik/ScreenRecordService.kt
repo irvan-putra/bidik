@@ -95,6 +95,14 @@ class ScreenRecordService : Service() {
         @Volatile
         internal var active = false
             private set
+
+        // Test-only handle: instrumentation runs in this process and
+        // drives the live overlay through the same onSample the sensor
+        // feeds. Not an exported command or intent; the injection
+        // itself lives entirely in the test source.
+        @Volatile
+        internal var activeMotionTrace: MotionTrace? = null
+            private set
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -260,6 +268,7 @@ class ScreenRecordService : Service() {
             motionTarget = target
             motionPartial = partial
             eng.motionTrace = log.trace
+            activeMotionTrace = log.trace
         }
 
         // The session is live from here: the stop control appears and a
@@ -366,6 +375,7 @@ class ScreenRecordService : Service() {
         // recording keeps it, moved next to its MP4.
         val motion = motionLog
         motionLog = null
+        activeMotionTrace = null
         val mPartial = motionPartial
         val mTarget = motionTarget
         motionPartial = null
