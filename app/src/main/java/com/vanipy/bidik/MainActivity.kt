@@ -526,16 +526,62 @@ class MainActivity : AppCompatActivity() {
                 android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
         }
         val exportBtn = Button(this).apply { text = "Export GIF" }
+
+        // TikTok-style frames viewer for choosing start/end by eye: a
+        // scrubbable preview above a thumbnail strip with draggable
+        // handles. The auto-detected candidates still fill the span;
+        // the seconds fields stay editable as the precise fallback.
+        val frameSource = RetrieverFrameSource(file)
+        val preview = android.widget.ImageView(this).apply {
+            setBackgroundColor(android.graphics.Color.BLACK)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+        }
+        val timeline = TrimTimelineView(this)
+        val density = resources.displayMetrics.density
+        box.addView(preview, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, (220 * density).toInt()))
+        box.addView(timeline, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, (56 * density).toInt()))
         box.addView(state)
         box.addView(candidatesBox)
         box.addView(startField)
         box.addView(endField)
         box.addView(exportBtn)
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("looping GIF from ${file.name}")
             .setView(box)
             .setNegativeButton("Close", null)
             .show()
+        dialog.setOnDismissListener { timeline.release() }
+
+        fun showFrameAt(timeMs: Long) {
+            scope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                val bmp = frameSource.frameAt(timeMs * 1000L, preview.width.coerceAtLeast(320))
+                launch(kotlinx.coroutines.Dispatchers.Main) {
+                    if (bmp != null) preview.setImageBitmap(bmp)
+                }
+            }
+        }
+        timeline.listener = { startMs, endMs, scrubbing, scrubMs ->
+            startField.setText((startMs / 1000.0).toString())
+            endField.setText((endMs / 1000.0).toString())
+            showFrameAt(if (scrubbing) scrubMs else startMs)
+        }
+        fun applyFieldsToHandles() {
+            val s = (startField.text.toString().toDoubleOrNull() ?: return) * 1000
+            val e = (endField.text.toString().toDoubleOrNull() ?: return) * 1000
+            timeline.setSpan(s.toLong(), e.toLong())
+        }
+        startField.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) applyFieldsToHandles() }
+        endField.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) applyFieldsToHandles() }
+        if (frameSource.durationMs() > 0) {
+            timeline.setSource(frameSource)
+            showFrameAt(0L)
+        } else {
+            state.text = "could not read this recording's frames"
+            timeline.visibility = android.view.View.GONE
+            preview.visibility = android.view.View.GONE
+        }
 
         // The loop search skips the same bands the hidden-bars option
         // crops away, so a clock change there cannot break a match.
@@ -581,6 +627,7 @@ class MainActivity : AppCompatActivity() {
                         setOnClickListener {
                             startField.setText((c.startMs / 1000.0).toString())
                             endField.setText((c.endMs / 1000.0).toString())
+                            timeline.setSpan(c.startMs, c.endMs)
                         }
                     })
                 }
