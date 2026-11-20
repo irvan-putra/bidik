@@ -31,7 +31,7 @@ jobs:
     # drift, family icon). Required before anything is built or signed.
     # Pinned to the reviewed full SHA; tags are movable.
     if: ${{ inputs.confirm_sign == 'SIGN' && github.ref == 'refs/heads/main' }}
-    uses: irvan-putra/patuh/.github/workflows/release-gate.yml@4e064163e62a3cf677e11de016ffbb6f4041816b
+    uses: irvan-putra/patuh/.github/workflows/release-gate.yml@7d2194fa4ce259fc92bdb2780f1fedb74ec8bf1b
     with:
       app: bidik
       published: false
