@@ -73,6 +73,36 @@ trap 'adb pull /sdcard/Android/data/com.vanipy.bidik/files/recordings-evidence/.
 rm -rf app/build/outputs/androidTest-results/connected
 rm -rf recordings
 
+echo "== upgrade-retention leg: record with 0.1.3 code, then upgrade =="
+# The build his phone runs today, exercising the real 0.1.3 record path
+# (debug-signed here: one job, one debug key, so the later install -r is
+# a true same-signer upgrade; store code is identical v0.1.3..HEAD).
+git clone -q --depth 1 --branch v0.1.3 https://github.com/irvan-putra/bidik /tmp/b013
+( cd /tmp/b013 && ./gradlew -PciEmulator assembleDebug assembleDebugAndroidTest --no-daemon )
+ok=0
+for attempt in 1 2 3; do
+  if adb install -r /tmp/b013/app/build/outputs/apk/debug/app-debug.apk \
+     && adb install -r /tmp/b013/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk; then
+    ok=1; break
+  fi
+  echo "0.1.3 install failed (attempt $attempt/3)" >&2
+  wait_ready 180 || true
+  sleep 10
+done
+[ "$ok" = 1 ] || { echo "0.1.3 install never succeeded" >&2; exit 1; }
+set +e
+timeout -k 30 900 adb shell "am instrument -w -e class com.vanipy.bidik.ScreenRecordTest com.vanipy.bidik.test/androidx.test.runner.AndroidJUnitRunner" > /tmp/record-013.log 2>&1
+rc013=$?
+set -e
+cat /tmp/record-013.log >&2 || true
+if [ $rc013 -ne 0 ] || ! grep -q '^OK (' /tmp/record-013.log; then
+  echo "0.1.3 record leg failed; cannot test retention without a pre-upgrade recording" >&2
+  exit 1
+fi
+OLD=$(adb shell run-as com.vanipy.bidik ls files/recordings | tr -d '\r')
+echo "0.1.3 recordings on device: $OLD"
+[ -n "$OLD" ] || { echo "0.1.3 produced no recording to retain" >&2; exit 1; }
+
 echo "== build app + test APKs (host, x86_64 emulator variant) =="
 ./gradlew -PciEmulator assembleDebug assembleDebugAndroidTest --no-daemon
 
@@ -90,6 +120,19 @@ if [ $irc -ne 0 ] || ! grep -q '^OK (' /tmp/record-instrument.log; then
   adb shell 'run-as com.vanipy.bidik cat files/logs/events-prev.log files/logs/events.log' 2>&1 | tail -60 >&2 || true
   exit 1
 fi
+
+echo "== post-upgrade retention check =="
+NEW=$(adb shell run-as com.vanipy.bidik ls files/recordings | tr -d '\r')
+for f in $OLD; do
+  echo "$NEW" | tr ' ' '\n' | grep -qx "$f" || { echo "0.1.3 recording $f LOST after upgrade to 0.1.4" >&2; exit 1; }
+done
+echo "retained: all 0.1.3 recordings present after upgrade to 0.1.4"
+# Best-effort app-level evidence: main-screen hierarchy after upgrade.
+adb shell am start -W -n com.vanipy.bidik/.MainActivity >/dev/null 2>&1 || true
+sleep 3
+adb shell uiautomator dump /sdcard/ui-upgrade.xml >/dev/null 2>&1 || true
+mkdir -p recordings
+adb pull /sdcard/ui-upgrade.xml recordings/ui-upgrade.xml >/dev/null 2>&1 || true
 
 mkdir -p recordings
 adb pull /sdcard/Android/data/com.vanipy.bidik/files/recordings-evidence/. recordings
