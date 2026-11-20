@@ -345,11 +345,6 @@ class ScreenRecordTest {
         assertTrue("no loop candidate in a periodic recording", result.candidates.isNotEmpty())
         val top = result.candidates.first()
         assertTrue("seam ${top.seam} too low for the periodic screen", top.seam >= 0.95)
-        assertTrue(
-            "loop span ${top.startMs}-${top.endMs} is not the ~1.6s cycle",
-            top.endMs - top.startMs in 1_200..2_000
-        )
-
         val gif = java.io.File(context.cacheDir, "loop-test.gif")
         gif.delete()
         val outcome = GifExporter.export(recording, top.startMs, top.endMs, gif)
@@ -370,6 +365,14 @@ class ScreenRecordTest {
         assertEquals(outcome.width, decoded!!.width)
         assertEquals(outcome.height, decoded.height)
         gif.copyTo(java.io.File(evidenceDir(), gif.name), overwrite = true)
+
+        // Accuracy check comes AFTER the export on purpose: the export
+        // proof must survive a mis-tuned span pick (the span accuracy is
+        // a known, loudly-reported tune gap, non-gating for the build).
+        assertTrue(
+            "loop span ${top.startMs}-${top.endMs} is not the ~1.6s cycle",
+            top.endMs - top.startMs in 1_200..2_000
+        )
 
         // Seam evidence at full resolution: the source frames at the
         // loop endpoints must be (nearly) the same picture, or the GIF
