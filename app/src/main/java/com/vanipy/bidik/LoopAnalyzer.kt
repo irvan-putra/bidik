@@ -57,7 +57,16 @@ object LoopAnalyzer {
             // the match at 20 fps too.
             val weights = LoopFinder.activityWeights(frames) ?: return coarse
             val refined = refine(retriever, top, skipTop, skipBottom, weights) ?: return coarse
-            return LoopFinder.Result(listOf(refined) + coarse.candidates.drop(1), null)
+            // The refined seam is measured at 20 fps: it is the more
+            // honest score. A coarse top that only LOOKED seamless at
+            // 5 fps (sampling aliasing) must not keep the top slot over
+            // a truly seamless span, so re-rank with the refined score
+            // instead of blindly prepending it.
+            val reranked = LoopFinder.rankCandidates(
+                listOf(refined) + coarse.candidates.drop(1),
+                coarse.candidates.size
+            )
+            return LoopFinder.Result(reranked, null)
         } finally {
             retriever.release()
         }

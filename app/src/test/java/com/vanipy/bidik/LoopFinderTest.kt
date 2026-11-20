@@ -191,4 +191,19 @@ class LoopFinderTest {
         assertTrue(result.candidates.isEmpty())
         assertTrue("expected a best-effort guess", result.bestEffort != null)
     }
+
+    @Test
+    fun refinedAliasDoesNotOutrankTrueSeam() {
+        // Emulator evidence (run 44669842490): a coarse top that only
+        // looked seamless at 5 fps scored 0.88 when refined at 20 fps,
+        // yet stayed first over true 0.9999 cycles. Re-ranking with the
+        // refined score must drop it behind them.
+        val alias = LoopFinder.Candidate(1800, 2200, 0.8801867789180363)
+        val trueA = LoopFinder.Candidate(3400, 4800, 0.9999658251100004)
+        val trueB = LoopFinder.Candidate(5000, 6400, 0.9999658251100004)
+        val ranked = LoopFinder.rankCandidates(listOf(alias, trueA, trueB), 3)
+        assertEquals(trueA, ranked[0])
+        assertEquals(trueB, ranked[1])
+        assertEquals(alias, ranked[2])
+    }
 }

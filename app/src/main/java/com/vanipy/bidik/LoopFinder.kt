@@ -268,20 +268,7 @@ object LoopFinder {
         for (idx in found.indices) {
             if (foundDeparture[idx] >= 0.8 * maxDeparture) eligible.add(found[idx])
         }
-        // Ranking: within RANK_SEAM_EPSILON of the best seam, the
-        // tightest single cycle wins (see the class doc); only a
-        // clearly better seam justifies a longer span.
-        val bestSeam = eligible.maxOfOrNull { it.seam } ?: 0.0
-        eligible.sortWith(
-            compareBy<Candidate> { if (it.seam >= bestSeam - RANK_SEAM_EPSILON) 0 else 1 }
-                .thenBy { it.endMs - it.startMs }
-                .thenByDescending { it.seam }
-        )
-        val picked = ArrayList<Candidate>()
-        for (c in eligible) {
-            if (picked.size >= maxCandidates) break
-            if (picked.none { overlaps(it, c) }) picked.add(c)
-        }
+        val picked = ArrayList(rankCandidates(eligible, maxCandidates))
         val bestEffort = if (picked.isEmpty() &&
             best != null &&
             hasCycleMotion(
@@ -313,6 +300,30 @@ object LoopFinder {
     }
 
     /** True when the spans overlap by more than half the shorter one. */
+    /**
+     * Shared candidate ranking: within [RANK_SEAM_EPSILON] of the best
+     * seam the tightest single cycle wins; only a clearly better seam
+     * justifies a longer span. Overlapping candidates are dropped after
+     * sorting so the list holds distinct spans.
+     */
+    internal fun rankCandidates(
+        candidates: List<Candidate>,
+        maxCandidates: Int
+    ): List<Candidate> {
+        val bestSeam = candidates.maxOfOrNull { it.seam } ?: 0.0
+        val sorted = candidates.sortedWith(
+            compareBy<Candidate> { if (it.seam >= bestSeam - RANK_SEAM_EPSILON) 0 else 1 }
+                .thenBy { it.endMs - it.startMs }
+                .thenByDescending { it.seam }
+        )
+        val picked = ArrayList<Candidate>()
+        for (c in sorted) {
+            if (picked.size >= maxCandidates) break
+            if (picked.none { overlaps(it, c) }) picked.add(c)
+        }
+        return picked
+    }
+
     private fun overlaps(a: Candidate, b: Candidate): Boolean {
         val shared = minOf(a.endMs, b.endMs) - maxOf(a.startMs, b.startMs)
         if (shared <= 0) return false
