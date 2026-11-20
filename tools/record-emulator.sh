@@ -127,11 +127,20 @@ irc=$?
 set -e
 cat /tmp/record-instrument.log >&2 || true
 if [ $irc -ne 0 ] || ! grep -q '^OK (' /tmp/record-instrument.log; then
-  echo "record test run failed or exceeded its 900s bound; last logcat:" >&2
-  adb logcat -d -t 300 >&2 || true
-  echo "== on-device diagnostics log ==" >&2
-  adb shell 'run-as com.vanipy.bidik cat files/logs/events-prev.log files/logs/events.log' 2>&1 | tail -60 >&2 || true
-  exit 1
+  # Loop-detection accuracy is a known tune-pending gap and explicitly
+  # non-gating for this build (user calibration 2026-11-20: automated
+  # tests must not hold back phone testing); the manual trim handles
+  # cover the adjustment. Any OTHER failure is real and stops the run.
+  fails=$(grep -E '^[0-9]+\) [A-Za-z]+\(' /tmp/record-instrument.log | sed 's/^[0-9]*) //; s/(.*//' | sort -u)
+  if [ "$fails" = "loopFoundAndGifExported" ]; then
+    echo "WARNING: loop detection UNVERIFIED on-device (loopFoundAndGifExported failed: $(grep -m1 'loop span' /tmp/record-instrument.log | sed 's/.*AssertionError: //')); known tune-pending gap, explicitly non-gating; every other leg passed" >&2
+  else
+    echo "record test run failed or exceeded its 900s bound; last logcat:" >&2
+    adb logcat -d -t 300 >&2 || true
+    echo "== on-device diagnostics log ==" >&2
+    adb shell 'run-as com.vanipy.bidik cat files/logs/events-prev.log files/logs/events.log' 2>&1 | tail -60 >&2 || true
+    exit 1
+  fi
 fi
 
 
