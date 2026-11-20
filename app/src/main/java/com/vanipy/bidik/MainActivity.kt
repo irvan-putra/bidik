@@ -1,9 +1,11 @@
 package com.vanipy.bidik
 
+import android.Manifest
 import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
@@ -100,6 +102,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var delayBtn: Button
     private lateinit var autoStopBtn: Button
     private lateinit var barsBtn: Button
+    private var soundBtn: Button? = null
+    private lateinit var micBtn: Button
+    private lateinit var motionBtn: Button
 
     private val recordStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -113,7 +118,14 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 ScreenRecordService.STATE_RECORDING ->
-                    status.text = "recording the screen... stop from the notification or here"
+                    status.text = if (intent.getBooleanExtra(
+                            ScreenRecordService.EXTRA_SOUND_MISSING, false
+                        )
+                    ) {
+                        "recording without the sound you chose (see the notification)"
+                    } else {
+                        "recording the screen... stop from the notification or here"
+                    }
                 ScreenRecordService.STATE_SAVED -> status.text = "recording saved on this phone"
                 ScreenRecordService.STATE_FAILED -> status.text = "screen recording failed or was empty"
                 ScreenRecordService.STATE_CANCELED -> status.text = "recording canceled before it started"
@@ -173,6 +185,39 @@ class MainActivity : AppCompatActivity() {
         optionsRow.addView(delayBtn, LinearLayout.LayoutParams(0, -2, 1f))
         optionsRow.addView(autoStopBtn, LinearLayout.LayoutParams(0, -2, 1f))
         optionsRow.addView(barsBtn, LinearLayout.LayoutParams(0, -2, 1f))
+        // Second row: the opt-in capture extras. Game sound needs Android
+        // 10's AudioPlaybackCapture, so its button exists only there; mic
+        // and motion work everywhere. All default off.
+        val captureRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        if (RecordOptions.soundSupported()) {
+            soundBtn = Button(this).apply {
+                setOnClickListener {
+                    RecordOptions.setSoundEnabled(
+                        this@MainActivity, !RecordOptions.soundEnabled(this@MainActivity)
+                    )
+                    renderRecordSection()
+                }
+            }
+            captureRow.addView(soundBtn, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        micBtn = Button(this).apply {
+            setOnClickListener {
+                RecordOptions.setMicEnabled(
+                    this@MainActivity, !RecordOptions.micEnabled(this@MainActivity)
+                )
+                renderRecordSection()
+            }
+        }
+        motionBtn = Button(this).apply {
+            setOnClickListener {
+                RecordOptions.setMotionEnabled(
+                    this@MainActivity, !RecordOptions.motionEnabled(this@MainActivity)
+                )
+                renderRecordSection()
+            }
+        }
+        captureRow.addView(micBtn, LinearLayout.LayoutParams(0, -2, 1f))
+        captureRow.addView(motionBtn, LinearLayout.LayoutParams(0, -2, 1f))
         recordBtn = Button(this).apply {
             setOnClickListener { onRecordClicked() }
         }
@@ -186,6 +231,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             addView(sectionHeader("Screen recording"))
             addView(optionsRow)
+            addView(captureRow)
             addView(recordBtn)
             addView(recordingsBox)
             addView(sectionHeader("Page captures"))
@@ -393,6 +439,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Android requires the RECORD_AUDIO runtime grant for app-sound
+     * capture too, so it is asked before the consent prompt whenever a
+     * sound option is on. The answer either way continues to consent:
+     * a decline means video-only, which the service says visibly.
+     */
+    private val audioPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            launchRecordConsent()
+        }
+
     private fun onRecordClicked() {
         if (RecordingStore.activeName(this) != null) {
             startService(
@@ -401,6 +458,19 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
+        val wantsAudio =
+            RecordOptions.soundEnabled(this) || RecordOptions.micEnabled(this)
+        val audioGranted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (wantsAudio && !audioGranted) {
+            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        launchRecordConsent()
+    }
+
+    private fun launchRecordConsent() {
         val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE)
             as android.media.projection.MediaProjectionManager
         recordConsent.launch(mgr.createScreenCaptureIntent())
@@ -417,6 +487,10 @@ class MainActivity : AppCompatActivity() {
         delayBtn.text = "start delay: ${RecordOptions.delayLabel(RecordOptions.delaySeconds(this))}"
         autoStopBtn.text = "auto-stop: ${RecordOptions.autoStopLabel(RecordOptions.autoStopSeconds(this))}"
         barsBtn.text = if (RecordOptions.barsHidden(this)) "system bars: hidden" else "system bars: shown"
+        soundBtn?.text =
+            if (RecordOptions.soundEnabled(this)) "game sound: on" else "game sound: off"
+        micBtn.text = if (RecordOptions.micEnabled(this)) "mic: on" else "mic: off"
+        motionBtn.text = if (RecordOptions.motionEnabled(this)) "motion: on" else "motion: off"
         recordingsBox.removeAllViews()
         val recordings = RecordingStore.listSharable(this)
         if (recordings.isNotEmpty()) {

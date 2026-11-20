@@ -23,6 +23,28 @@ class RecordOptionsTest {
         assertEquals(0, RecordOptions.autoStopSeconds(context))
         // Full-screen output stays the default.
         assertFalse(RecordOptions.barsHidden(context))
+        // Every capture extra starts off: sound only when the user asks.
+        assertFalse(RecordOptions.soundEnabled(context))
+        assertFalse(RecordOptions.micEnabled(context))
+        assertFalse(RecordOptions.motionEnabled(context))
+    }
+
+    @Test
+    fun captureExtrasPersist() {
+        context.getSharedPreferences("record_options", 0).edit().clear().commit()
+        RecordOptions.setSoundEnabled(context, true)
+        RecordOptions.setMicEnabled(context, true)
+        RecordOptions.setMotionEnabled(context, true)
+        // Game sound reports on only where Android 10+ can capture.
+        assertEquals(RecordOptions.soundSupported(), RecordOptions.soundEnabled(context))
+        assertTrue(RecordOptions.micEnabled(context))
+        assertTrue(RecordOptions.motionEnabled(context))
+        RecordOptions.setSoundEnabled(context, false)
+        RecordOptions.setMicEnabled(context, false)
+        RecordOptions.setMotionEnabled(context, false)
+        assertFalse(RecordOptions.soundEnabled(context))
+        assertFalse(RecordOptions.micEnabled(context))
+        assertFalse(RecordOptions.motionEnabled(context))
     }
 
     @Test
