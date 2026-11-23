@@ -13,8 +13,8 @@ android {
         // instrumentation tests in src/androidTest. Without it, Gradle can
         // exit successfully after starting zero tests.
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
-        versionCode((project.findProperty('versionCode') ?: '9') as Integer)
-        versionName((project.findProperty('versionName') ?: '0.1.8') as String)
+        versionCode((project.findProperty('versionCode') ?: '10') as Integer)
+        versionName((project.findProperty('versionName') ?: '0.1.9') as String)
         // Chaquopy requires an explicit ABI list, so the filter is always
         // set, never dropped. Production builds arm64-v8a only: the
         // DeltaChat rpc server vendored under jniLibs (see THIRD-PARTY.md)
