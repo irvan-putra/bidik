@@ -30,8 +30,8 @@ class MainActivityRenderTest {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
         File(app.filesDir, "capture-queue.json").writeText(
             """{"type":"capture-queue","v":1,"pages":[
-              {"id":"vana-home","url":"https://example.com/vana/"},
-              {"id":"vana-c1","url":"https://example.com/vana/#c1","full_page":false}
+              {"id":"bedah-home","url":"https://example.com/bedah/"},
+              {"id":"bedah-c1","url":"https://example.com/bedah/#c1","full_page":false}
             ]}"""
         )
         val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
