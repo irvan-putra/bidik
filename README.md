@@ -54,6 +54,13 @@ Earlier: [v0.1.1](https://github.com/irvan-putra/bidik/releases/tag/v0.1.1), [v0
 
 Builds come from the manual `sign test apk` workflow, which tests the exact commit without any secrets before a separate minimal job signs the unsigned APK. An in-app updater that pulls new releases is a planned follow-up.
 
+## Jin link (parked)
+
+A planned route sends capture requests in and results out through the shared
+DeltaChat bot host Jin, with no phone number or login. Client code exists but
+the app does not use it yet and nothing depends on it. Details and open
+items: [docs/jin-link.md](docs/jin-link.md).
+
 ## Capture fidelity
 
 The app renders pages with the phone's system WebView at the phone's real
