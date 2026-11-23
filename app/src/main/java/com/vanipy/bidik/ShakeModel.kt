@@ -4,12 +4,13 @@ package com.vanipy.bidik
  * Accelerometer-driven "shake the phone, shake the video" model.
  *
  * Fed by the same sensor stream as the motion dot/CSV (MotionLog), but
- * instead of drawing an indicator it moves the recorded picture itself:
- * the frame slides and rolls a little with the phone, as if the picture
- * were loosely bolted to the screen, and a forward/back jolt nudges the
- * zoom. A resting phone's picture stays still, hard shakes hit tasteful
- * caps, and a small cover zoom hides the edges the shifted picture
- * would otherwise reveal.
+ * instead of drawing an indicator it moves the recorded picture itself,
+ * tuned for the handycam look of movie footage: a smooth, continuous
+ * low-frequency sway as the hand wanders, with sharp jolts spreading
+ * into a slow swell rather than a mechanical snap, and a small zoom
+ * pulse on forward/back movement. A resting phone's picture settles to
+ * near-still, hard shakes hit tasteful caps, and a small cover zoom
+ * hides the edges the shifted picture would otherwise reveal.
  *
  * The reference posture is the recording's own recent pose: the first
  * sample seeds it and a very slow filter re-centers over ~10s, so a
@@ -97,23 +98,31 @@ internal class ShakeModel {
         /** Recent-pose filter: ~10s re-centering at a 50Hz sensor. */
         private const val REST_ALPHA = 0.002f
 
-        /** Displacement filter: fast enough to catch a deliberate shake. */
-        private const val DISP_ALPHA = 0.25f
+        /**
+         * Displacement filter, deliberately slow: sub-second jolts are
+         * spread into a gentle swell (the handycam character) instead of
+         * the picture snapping frame to frame.
+         */
+        private const val DISP_ALPHA = 0.05f
 
-        /** NDC shift per m/s^2 of displacement; ~2.6px/X and ~5px/Y on 432x848. */
-        private const val SHIFT_PER_MS2 = 0.012f
+        /** NDC shift per m/s^2 of displacement; ~6.5px/X and ~13px/Y on 432x848. */
+        private const val SHIFT_PER_MS2 = 0.030f
 
         /** Picture shift cap: 3.5% of the half-span, ~15px/X and ~30px/Y on 432x848. */
         internal const val MAX_SHIFT = 0.07f
 
         /** Fraction of phone roll shown as picture roll. */
-        private const val ROT_GAIN = 0.12f
+        private const val ROT_GAIN = 0.22f
 
         /** Picture roll cap in degrees. */
         internal const val MAX_ROT_DEG = 3f
 
-        /** Per-frame chase rate at the fixed 30fps capture cadence. */
-        private const val FRAME_LERP = 0.30f
+        /**
+         * Per-frame chase rate at the fixed 30fps capture cadence, low
+         * on purpose: the picture eases toward its target over ~half a
+         * second, which is what makes motion read as organic sway.
+         */
+        private const val FRAME_LERP = 0.07f
 
         /** Zoom pulse per m/s^2 of forward/back jolt. */
         private const val ZOOM_PER_MS2 = 0.004f

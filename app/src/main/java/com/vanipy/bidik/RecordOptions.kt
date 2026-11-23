@@ -37,10 +37,11 @@ import android.os.Build
  *   live dot into the video that drifts with tilt and grows with
  *   movement, so viewers see the phone being handled. No permission
  *   needed; the accelerometer is the phone's own sensor.
- * - shake: moves the recorded picture itself with the phone: the frame
- *   slides and rolls a little with movement, as if loosely bolted to
- *   the screen, with a small zoom pulse on forward/back jolts. Caps
- *   keep a resting phone's picture still, and a cover zoom hides the
+ * - shake: moves the recorded picture itself with the phone, tuned
+ *   for the handycam look of movie footage: a smooth low-frequency
+ *   sway as the hand wanders, sharp jolts spread into a slow swell,
+ *   and a small zoom pulse on forward/back movement. Caps keep a
+ *   resting phone's picture nearly still, and a cover zoom hides the
  *   edges the shifted picture would reveal. Rides the same
  *   accelerometer stream as motion but is an independent toggle: the
  *   dot, the CSV and the shake can be combined freely. No permission
