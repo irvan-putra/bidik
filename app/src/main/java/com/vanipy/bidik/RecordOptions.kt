@@ -37,6 +37,14 @@ import android.os.Build
  *   live dot into the video that drifts with tilt and grows with
  *   movement, so viewers see the phone being handled. No permission
  *   needed; the accelerometer is the phone's own sensor.
+ * - shake: moves the recorded picture itself with the phone: the frame
+ *   slides and rolls a little with movement, as if loosely bolted to
+ *   the screen, with a small zoom pulse on forward/back jolts. Caps
+ *   keep a resting phone's picture still, and a cover zoom hides the
+ *   edges the shifted picture would reveal. Rides the same
+ *   accelerometer stream as motion but is an independent toggle: the
+ *   dot, the CSV and the shake can be combined freely. No permission
+ *   needed either.
  *
  * Defaults: 3s delay (the reason this screen exists), no auto-stop
  * (recordings only end on purpose), bars shown (full-screen output is
@@ -50,6 +58,7 @@ object RecordOptions {
     private const val KEY_SOUND = "app_sound"
     private const val KEY_MIC = "mic"
     private const val KEY_MOTION = "motion_log"
+    private const val KEY_SHAKE = "motion_shake"
 
     val DELAY_CHOICES = intArrayOf(0, 3, 5, 10)
     const val DEFAULT_DELAY_SEC = 3
@@ -106,6 +115,14 @@ object RecordOptions {
 
     fun setMotionEnabled(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean(KEY_MOTION, on).apply()
+    }
+
+    /** Picture-shake effect drawn from the accelerometer. Default off. */
+    fun shakeEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SHAKE, false)
+
+    fun setShakeEnabled(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SHAKE, on).apply()
     }
 
     fun setBarsHidden(context: Context, hidden: Boolean) {

@@ -125,6 +125,17 @@ internal class CaptureEngine(
      */
     internal var motionTrace: MotionTrace? = null
 
+    /**
+     * Optional picture shake, attached by the service when the shake
+     * option is on: the screen quad itself is shifted, rolled and cover-
+     * zoomed per frame from the model's outputs, so phone movement shows
+     * in the video as movement of the picture. Independent of the dot.
+     */
+    internal var shakeModel: ShakeModel? = null
+
+    private val shakeBuffer = ByteBuffer.allocateDirect(8 * 4)
+        .order(ByteOrder.nativeOrder())
+
     private val muxLock = Any()
     private var expectedTracks = 1
     private var tracksAdded = 0
@@ -183,7 +194,7 @@ internal class CaptureEngine(
         }
     }
 
-    private val vertexBuffer = floatBufferOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
+    private val vertexBuffer = floatBufferOf(*BASE_QUAD)
     private val texBuffer = floatBufferOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
 
     private val tick = object : Runnable {
@@ -288,6 +299,32 @@ internal class CaptureEngine(
         drawNow()
     }
 
+    /**
+     * The quad to draw the screen texture with. Without the shake
+     * option this is the fullscreen quad; with it, the quad is rotated
+     * by the model's roll, cover-zoomed by its scale and shifted by its
+     * offset, recomputed per frame (4 vertices, negligible cost).
+     */
+    private fun screenVertexBuffer(): ByteBuffer {
+        val shake = shakeModel ?: return vertexBuffer
+        shake.advanceFrame()
+        val rad = Math.toRadians(shake.rotationDeg.toDouble())
+        val cos = kotlin.math.cos(rad).toFloat()
+        val sin = kotlin.math.sin(rad).toFloat()
+        val s = shake.scale
+        val dx = shake.offsetX
+        val dy = shake.offsetY
+        val out = shakeBuffer.asFloatBuffer()
+        out.clear()
+        for (i in 0 until 4) {
+            val bx = BASE_QUAD[i * 2]
+            val by = BASE_QUAD[i * 2 + 1]
+            out.put((bx * cos - by * sin) * s + dx)
+            out.put((bx * sin + by * cos) * s + dy)
+        }
+        return shakeBuffer
+    }
+
     /** Renders the current texture to the encoder with a wall-clock PTS. */
     private fun drawNow() {
         if (!haveTexture) return
@@ -295,7 +332,7 @@ internal class CaptureEngine(
         GLES20.glUseProgram(program)
         GLES20.glUniformMatrix4fv(uTexMatrix, 1, false, texMatrix, 0)
         GLES20.glEnableVertexAttribArray(aPos)
-        GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+        GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, screenVertexBuffer())
         GLES20.glEnableVertexAttribArray(aTex)
         GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 0, texBuffer)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
@@ -616,6 +653,9 @@ internal class CaptureEngine(
     }
 
     companion object {
+        /** Fullscreen triangle-strip quad in NDC; [vertexBuffer] and the shake transform share it. */
+        private val BASE_QUAD = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
+
         private const val MIME_TYPE = "video/avc"
         private const val FRAME_RATE = 30
         private const val FRAME_INTERVAL_MS = 33L

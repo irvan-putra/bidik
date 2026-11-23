@@ -105,6 +105,7 @@ class MainActivity : AppCompatActivity() {
     private var soundBtn: Button? = null
     private lateinit var micBtn: Button
     private lateinit var motionBtn: Button
+    private lateinit var shakeBtn: Button
 
     private val recordStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -186,8 +187,8 @@ class MainActivity : AppCompatActivity() {
         optionsRow.addView(autoStopBtn, LinearLayout.LayoutParams(0, -2, 1f))
         optionsRow.addView(barsBtn, LinearLayout.LayoutParams(0, -2, 1f))
         // Second row: the opt-in capture extras. Game sound needs Android
-        // 10's AudioPlaybackCapture, so its button exists only there; mic
-        // and motion work everywhere. All default off.
+        // 10's AudioPlaybackCapture, so its button exists only there; mic,
+        // motion and shake work everywhere. All default off.
         val captureRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         if (RecordOptions.soundSupported()) {
             soundBtn = Button(this).apply {
@@ -216,8 +217,17 @@ class MainActivity : AppCompatActivity() {
                 renderRecordSection()
             }
         }
+        shakeBtn = Button(this).apply {
+            setOnClickListener {
+                RecordOptions.setShakeEnabled(
+                    this@MainActivity, !RecordOptions.shakeEnabled(this@MainActivity)
+                )
+                renderRecordSection()
+            }
+        }
         captureRow.addView(micBtn, LinearLayout.LayoutParams(0, -2, 1f))
         captureRow.addView(motionBtn, LinearLayout.LayoutParams(0, -2, 1f))
+        captureRow.addView(shakeBtn, LinearLayout.LayoutParams(0, -2, 1f))
         recordBtn = Button(this).apply {
             setOnClickListener { onRecordClicked() }
         }
@@ -491,6 +501,7 @@ class MainActivity : AppCompatActivity() {
             if (RecordOptions.soundEnabled(this)) "game sound: on" else "game sound: off"
         micBtn.text = if (RecordOptions.micEnabled(this)) "mic: on" else "mic: off"
         motionBtn.text = if (RecordOptions.motionEnabled(this)) "motion: on" else "motion: off"
+        shakeBtn.text = if (RecordOptions.shakeEnabled(this)) "shake: on" else "shake: off"
         recordingsBox.removeAllViews()
         val recordings = RecordingStore.listSharable(this)
         if (recordings.isNotEmpty()) {

@@ -91,6 +91,7 @@ class ScreenRecordTest {
         RecordOptions.setSoundEnabled(context, false)
         RecordOptions.setMicEnabled(context, false)
         RecordOptions.setMotionEnabled(context, false)
+        RecordOptions.setShakeEnabled(context, false)
     }
 
     @After
@@ -655,6 +656,61 @@ class ScreenRecordTest {
         assertTrue(
             "motion overlay did not visibly respond (region diff $movedDiff)",
             movedDiff > 5.0
+        )
+    }
+
+    /**
+     * The shake option must move the recorded picture itself, not draw
+     * an indicator: with the motion option (dot) OFF, synthetic samples
+     * through the same ShakeModel.onSample the sensor feeds (test-only
+     * process-local handle, no production command) must displace the
+     * whole frame against the calm baseline, while two calm frames stay
+     * put against each other.
+     */
+    @Test
+    fun shakeEffectDisplacesVideo() {
+        RecordOptions.setShakeEnabled(context, true)
+        val before = recordingsPresent()
+        startConsentedRecording()
+        val stop = waitForStopControl()
+        Thread.sleep(2_000)
+        val model = ScreenRecordService.activeShakeModel
+        assertNotNull("shake model not live during recording", model)
+        // Sustained sideways jolt, fast enough to dominate the real
+        // sensor stream (same reasoning as the overlay test).
+        repeat(200) {
+            model!!.onSample(6f, 9.81f, 3f)
+            Thread.sleep(10)
+        }
+        stop.click()
+
+        val recording = waitForRecording(30_000, before)
+        assertNotNull("no saved recording after stop: " + windowDump(), recording)
+        recording!!.copyTo(
+            java.io.File(evidenceDir(), recording.name),
+            overwrite = true
+        )
+
+        val calmA = frameAt(
+            recording, 1_000_000, MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        val calmB = frameAt(
+            recording, 1_500_000, MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        val moved = frameAt(
+            recording, 3_500_000, MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        assertNotNull("no calm baseline frame in recording", calmA)
+        assertNotNull("no second calm frame in recording", calmB)
+        assertNotNull("no shaken frame in recording", moved)
+        saveEvidenceBitmap("shake-calm-a.png", calmA!!)
+        saveEvidenceBitmap("shake-moved.png", moved!!)
+        val stillDiff = meanAbsDiff(calmA, calmB!!)
+        val movedDiff = meanAbsDiff(calmA, moved!!)
+        assertTrue(
+            "shake option did not displace the video " +
+                "(moved MAD $movedDiff, still MAD $stillDiff)",
+            movedDiff > 5.0 && movedDiff > stillDiff * 3 + 2
         )
     }
 

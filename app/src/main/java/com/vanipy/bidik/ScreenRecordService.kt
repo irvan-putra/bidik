@@ -47,7 +47,9 @@ import java.io.File
  * microphone, mixed into one AAC track (both need the RECORD_AUDIO
  * runtime grant; the mic source is opened only for the mic option);
  * the motion option records an accelerometer CSV next to the MP4 and
- * draws a live motion dot into the video. When a wanted sound source
+ * draws a live motion dot into the video; the shake option moves the
+ * recorded picture itself with the phone (shift/roll/zoom-pulse with
+ * caps), riding the same sensor stream. When a wanted sound source
  * cannot start - permission declined, device too old, capture refused -
  * the recording continues video-only and says so in the notification
  * and status broadcast; it never fails silently.
@@ -102,6 +104,9 @@ class ScreenRecordService : Service() {
         // itself lives entirely in the test source.
         @Volatile
         internal var activeMotionTrace: MotionTrace? = null
+
+        /** Test-only handle for injecting synthetic shake samples. */
+        internal var activeShakeModel: ShakeModel? = null
             private set
     }
 
@@ -255,20 +260,29 @@ class ScreenRecordService : Service() {
             }
         }
 
-        // Optional motion capture: an accelerometer sidecar CSV next to
-        // the saved MP4, plus the live dot drawn into the video itself.
-        if (RecordOptions.motionEnabled(this)) {
+        // Optional motion capture: one accelerometer stream feeds the
+        // sidecar CSV + live dot (motion option) and/or the picture
+        // shake effect (shake option); the toggles are independent.
+        val wantMotion = RecordOptions.motionEnabled(this)
+        val wantShake = RecordOptions.shakeEnabled(this)
+        if (wantMotion || wantShake) {
             val target = File(
                 RecordingStore.dir(this),
                 file.nameWithoutExtension + ".motion.csv"
             )
             val partial = File(cacheDir, target.name + ".part")
-            val log = MotionLog(this, partial) { eng.firstFrameNanos }
+            val log = MotionLog(this, partial, writeCsv = wantMotion) { eng.firstFrameNanos }
             motionLog = log
-            motionTarget = target
-            motionPartial = partial
-            eng.motionTrace = log.trace
+            if (wantMotion) {
+                motionTarget = target
+                motionPartial = partial
+                eng.motionTrace = log.trace
+            }
+            if (wantShake) {
+                eng.shakeModel = log.shake
+            }
             activeMotionTrace = log.trace
+            activeShakeModel = log.shake
         }
 
         // The session is live from here: the stop control appears and a
@@ -339,7 +353,8 @@ class ScreenRecordService : Service() {
         }
         DiagLog.log(this, "record", "start",
             detail = "delay=$delaySec autostop=$autoStopSec bars=$bars " +
-                "sound=$sound motion=${motionLog != null}")
+                "sound=$sound motion=${RecordOptions.motionEnabled(this)} " +
+                "shake=${RecordOptions.shakeEnabled(this)}")
         broadcastStatus(STATE_RECORDING, null, soundMissing = audioMissing)
     }
 
@@ -376,6 +391,7 @@ class ScreenRecordService : Service() {
         val motion = motionLog
         motionLog = null
         activeMotionTrace = null
+        activeShakeModel = null
         val mPartial = motionPartial
         val mTarget = motionTarget
         motionPartial = null

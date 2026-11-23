@@ -30,11 +30,15 @@ import java.io.File
 internal class MotionLog(
     context: Context,
     private val partialFile: File,
+    private val writeCsv: Boolean = true,
     private val startNanos: () -> Long
 ) : SensorEventListener {
 
     /** Live summary for the video overlay; fed by every sample. */
     internal val trace = MotionTrace()
+
+    /** Live model for the picture-shake effect; fed by every sample. */
+    internal val shake = ShakeModel()
 
     private val manager =
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -47,8 +51,12 @@ internal class MotionLog(
     /** Opens the partial file and starts sampling. False when no sensor. */
     fun start(): Boolean {
         val sensor = manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return false
-        partialFile.delete()
-        writer = partialFile.bufferedWriter()
+        // The CSV is only opened when the motion option asked for one;
+        // the shake effect rides the same sensor stream without a file.
+        if (writeCsv) {
+            partialFile.delete()
+            writer = partialFile.bufferedWriter()
+        }
         val ht = HandlerThread("bidik-motion")
         ht.start()
         thread = ht
@@ -64,6 +72,7 @@ internal class MotionLog(
     override fun onSensorChanged(event: SensorEvent) {
         if (!running) return
         trace.onSample(event.values[0], event.values[1], event.values[2])
+        shake.onSample(event.values[0], event.values[1], event.values[2])
         if (t0Nanos < 0) {
             val videoStart = startNanos()
             t0Nanos = if (videoStart > 0) videoStart else System.nanoTime()
@@ -96,7 +105,8 @@ internal class MotionLog(
         } catch (_: Exception) {
         }
         writer = null
-        val ok = save && samples > 0 && partialFile.exists() && partialFile.length() > 0
+        val ok = writeCsv && save && samples > 0 &&
+            partialFile.exists() && partialFile.length() > 0
         if (!ok) cleanupFile()
         return ok
     }
