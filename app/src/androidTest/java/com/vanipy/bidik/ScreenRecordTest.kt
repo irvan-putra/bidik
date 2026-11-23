@@ -91,6 +91,7 @@ class ScreenRecordTest {
         RecordOptions.setSoundEnabled(context, false)
         RecordOptions.setMicEnabled(context, false)
         RecordOptions.setMotionEnabled(context, false)
+        RecordOptions.setDotEnabled(context, false)
         RecordOptions.setShakeEnabled(context, false)
     }
 
@@ -619,6 +620,7 @@ class ScreenRecordTest {
     @Test
     fun motionOverlayRespondsToMovement() {
         RecordOptions.setMotionEnabled(context, true)
+        RecordOptions.setDotEnabled(context, true)
         val before = recordingsPresent()
         startConsentedRecording()
         val stop = waitForStopControl()
@@ -711,6 +713,64 @@ class ScreenRecordTest {
             "shake option did not displace the video " +
                 "(moved MAD $movedDiff, still MAD $stillDiff)",
             movedDiff > 5.0 && movedDiff > stillDiff * 3 + 2
+        )
+    }
+
+    /**
+     * The dot is its own toggle: with motion (CSV) on and the dot OFF,
+     * the sidecar must still be written while the injected motion must
+     * NOT appear in the video's dot region. Mirror image of
+     * motionOverlayRespondsToMovement, which proves the same injection
+     * is plainly visible when the dot is on.
+     */
+    @Test
+    fun dotToggleHidesDotButKeepsCsv() {
+        RecordOptions.setMotionEnabled(context, true)
+        RecordOptions.setDotEnabled(context, false)
+        val before = recordingsPresent()
+        startConsentedRecording()
+        val stop = waitForStopControl()
+        Thread.sleep(2_000)
+        val trace = ScreenRecordService.activeMotionTrace
+        assertNotNull("motion trace not live during recording", trace)
+        repeat(200) {
+            trace!!.onSample(6f, 6f, 15f)
+            Thread.sleep(10)
+        }
+        stop.click()
+
+        val recording = waitForRecording(30_000, before)
+        assertNotNull("no saved recording after stop: " + windowDump(), recording)
+        recording!!.copyTo(
+            java.io.File(evidenceDir(), recording.name),
+            overwrite = true
+        )
+
+        // The CSV half of the motion option is unaffected by the dot.
+        val sidecar = java.io.File(
+            RecordingStore.dir(context),
+            recording.nameWithoutExtension + ".motion.csv"
+        )
+        assertTrue("no motion sidecar next to the recording", sidecar.exists())
+        assertTrue(
+            "motion sidecar too short: ${sidecar.readLines().size} rows",
+            sidecar.readLines().size > 50
+        )
+
+        val calm = frameAt(
+            recording, 1_000_000, MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        val moved = frameAt(
+            recording, 3_500_000, MediaMetadataRetriever.OPTION_CLOSEST
+        )
+        assertNotNull("no calm baseline frame in recording", calm)
+        assertNotNull("no moved frame in recording", moved)
+        saveEvidenceBitmap("dot-off-calm.png", calm!!)
+        saveEvidenceBitmap("dot-off-moved.png", moved!!)
+        val movedDiff = dotRegionDiff(calm, moved)
+        assertTrue(
+            "dot showed with the dot option off (region diff $movedDiff)",
+            movedDiff < 5.0
         )
     }
 

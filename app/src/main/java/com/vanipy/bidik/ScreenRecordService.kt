@@ -261,11 +261,13 @@ class ScreenRecordService : Service() {
         }
 
         // Optional motion capture: one accelerometer stream feeds the
-        // sidecar CSV + live dot (motion option) and/or the picture
-        // shake effect (shake option); the toggles are independent.
+        // sidecar CSV (motion option), the live dot (dot option) and/or
+        // the picture shake effect (shake option); the three toggles
+        // are independent.
         val wantMotion = RecordOptions.motionEnabled(this)
+        val wantDot = RecordOptions.dotEnabled(this)
         val wantShake = RecordOptions.shakeEnabled(this)
-        if (wantMotion || wantShake) {
+        if (wantMotion || wantDot || wantShake) {
             val target = File(
                 RecordingStore.dir(this),
                 file.nameWithoutExtension + ".motion.csv"
@@ -276,6 +278,8 @@ class ScreenRecordService : Service() {
             if (wantMotion) {
                 motionTarget = target
                 motionPartial = partial
+            }
+            if (wantDot) {
                 eng.motionTrace = log.trace
             }
             if (wantShake) {
@@ -354,6 +358,7 @@ class ScreenRecordService : Service() {
         DiagLog.log(this, "record", "start",
             detail = "delay=$delaySec autostop=$autoStopSec bars=$bars " +
                 "sound=$sound motion=${RecordOptions.motionEnabled(this)} " +
+                "dot=${RecordOptions.dotEnabled(this)} " +
                 "shake=${RecordOptions.shakeEnabled(this)}")
         broadcastStatus(STATE_RECORDING, null, soundMissing = audioMissing)
     }

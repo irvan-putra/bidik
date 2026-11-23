@@ -33,10 +33,12 @@ import android.os.Build
  *   Also needs RECORD_AUDIO. Off by default; nothing records the room
  *   unless the user turns this on.
  * - motion: writes a timestamped accelerometer CSV next to the MP4
- *   (same base name, .motion.csv) for replay/sync, and draws a small
- *   live dot into the video that drifts with tilt and grows with
- *   movement, so viewers see the phone being handled. No permission
+ *   (same base name, .motion.csv) for replay/sync. No permission
  *   needed; the accelerometer is the phone's own sensor.
+ * - dot: draws a small live dot into the video that drifts with tilt
+ *   and grows with movement, so viewers see the phone being handled.
+ *   Independent of motion: the CSV can record without the dot showing,
+ *   and the dot can show without the CSV being kept.
  * - shake: moves the recorded picture itself with the phone, tuned
  *   for the handycam look of movie footage: a smooth low-frequency
  *   sway as the hand wanders, sharp jolts spread into a slow swell,
@@ -59,6 +61,7 @@ object RecordOptions {
     private const val KEY_SOUND = "app_sound"
     private const val KEY_MIC = "mic"
     private const val KEY_MOTION = "motion_log"
+    private const val KEY_DOT = "motion_dot"
     private const val KEY_SHAKE = "motion_shake"
 
     val DELAY_CHOICES = intArrayOf(0, 3, 5, 10)
@@ -110,12 +113,24 @@ object RecordOptions {
         prefs(context).edit().putBoolean(KEY_MIC, on).apply()
     }
 
-    /** Accelerometer sidecar + overlay dot. Default off. */
+    /** Accelerometer sidecar CSV. Default off. */
     fun motionEnabled(context: Context): Boolean =
         prefs(context).getBoolean(KEY_MOTION, false)
 
     fun setMotionEnabled(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean(KEY_MOTION, on).apply()
+    }
+
+    /**
+     * Live motion dot drawn into the video. Default off like every
+     * capture extra; the accelerometer stream runs while any of
+     * motion, dot or shake is on.
+     */
+    fun dotEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_DOT, false)
+
+    fun setDotEnabled(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean(KEY_DOT, on).apply()
     }
 
     /** Picture-shake effect drawn from the accelerometer. Default off. */
