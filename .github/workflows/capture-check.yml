@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       queue_url:
-        description: 'public page URL to capture (default: the vana canvas currently under review)'
+        description: 'public page URL to capture (default: the bedah canvas currently under review)'
         required: false
-        default: 'https://vanipy.com/vana/'
+        default: 'https://vanipy.com/bedah/'
 
 permissions:
   contents: read
