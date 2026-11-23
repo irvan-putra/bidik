@@ -77,7 +77,7 @@ internal class ShakeModel {
         // right a little. Only a fraction of the roll, capped.
         val rollDeg = Math.toDegrees(
             kotlin.math.atan2(dispX.toDouble(), baseY.toDouble())
-        ).toFloat
+        ).toFloat()
         val targetRot = (-rollDeg * ROT_GAIN).coerceIn(-MAX_ROT_DEG, MAX_ROT_DEG)
         offsetX += (targetX - offsetX) * FRAME_LERP
         offsetY += (targetY - offsetY) * FRAME_LERP
