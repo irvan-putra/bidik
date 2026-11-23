@@ -52,9 +52,15 @@ object RecordingStore {
             ?.sortedByDescending { it.lastModified() }
             ?: emptyList()
 
-    /** Everything the user can share: recordings and exported GIFs. */
+    /**
+     * Everything the user can share: recordings, exported GIFs and the
+     * .motion.csv sidecars. A sidecar sits next to its video in the
+     * newest-first order, since it is finalized right after the MP4.
+     */
     fun listSharable(context: Context): List<File> =
-        dir(context).listFiles { f -> f.isFile && (f.extension == "mp4" || f.extension == "gif") }
+        dir(context).listFiles { f ->
+            f.isFile && (f.extension == "mp4" || f.extension == "gif" || f.extension == "csv")
+        }
             ?.sortedByDescending { it.lastModified() }
             ?: emptyList()
 
@@ -83,7 +89,12 @@ object RecordingStore {
         val target = File(dir, fileName).canonicalFile
         if (target.parentFile != dir) return false
         if (activeName(context) == fileName) return false
-        return target.delete()
+        val deleted = target.delete()
+        if (deleted && target.extension == "mp4") {
+            // A video's motion sidecar goes with it, never orphaned.
+            File(dir, target.nameWithoutExtension + ".motion.csv").delete()
+        }
+        return deleted
     }
 
     fun setActive(context: Context, fileName: String) {

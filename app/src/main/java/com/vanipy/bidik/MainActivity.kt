@@ -105,6 +105,7 @@ class MainActivity : AppCompatActivity() {
     private var soundBtn: Button? = null
     private lateinit var micBtn: Button
     private lateinit var motionBtn: Button
+    private lateinit var dotBtn: Button
     private lateinit var shakeBtn: Button
 
     private val recordStatusReceiver = object : BroadcastReceiver() {
@@ -188,7 +189,7 @@ class MainActivity : AppCompatActivity() {
         optionsRow.addView(barsBtn, LinearLayout.LayoutParams(0, -2, 1f))
         // Second row: the opt-in capture extras. Game sound needs Android
         // 10's AudioPlaybackCapture, so its button exists only there; mic,
-        // motion and shake work everywhere. All default off.
+        // motion, dot and shake work everywhere. All default off.
         val captureRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         if (RecordOptions.soundSupported()) {
             soundBtn = Button(this).apply {
@@ -217,6 +218,14 @@ class MainActivity : AppCompatActivity() {
                 renderRecordSection()
             }
         }
+        dotBtn = Button(this).apply {
+            setOnClickListener {
+                RecordOptions.setDotEnabled(
+                    this@MainActivity, !RecordOptions.dotEnabled(this@MainActivity)
+                )
+                renderRecordSection()
+            }
+        }
         shakeBtn = Button(this).apply {
             setOnClickListener {
                 RecordOptions.setShakeEnabled(
@@ -227,6 +236,7 @@ class MainActivity : AppCompatActivity() {
         }
         captureRow.addView(micBtn, LinearLayout.LayoutParams(0, -2, 1f))
         captureRow.addView(motionBtn, LinearLayout.LayoutParams(0, -2, 1f))
+        captureRow.addView(dotBtn, LinearLayout.LayoutParams(0, -2, 1f))
         captureRow.addView(shakeBtn, LinearLayout.LayoutParams(0, -2, 1f))
         recordBtn = Button(this).apply {
             setOnClickListener { onRecordClicked() }
@@ -501,6 +511,7 @@ class MainActivity : AppCompatActivity() {
             if (RecordOptions.soundEnabled(this)) "game sound: on" else "game sound: off"
         micBtn.text = if (RecordOptions.micEnabled(this)) "mic: on" else "mic: off"
         motionBtn.text = if (RecordOptions.motionEnabled(this)) "motion: on" else "motion: off"
+        dotBtn.text = if (RecordOptions.dotEnabled(this)) "dot: on" else "dot: off"
         shakeBtn.text = if (RecordOptions.shakeEnabled(this)) "shake: on" else "shake: off"
         recordingsBox.removeAllViews()
         val recordings = RecordingStore.listSharable(this)
@@ -512,7 +523,13 @@ class MainActivity : AppCompatActivity() {
             for (file in recordings) {
                 val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
                 row.addView(TextView(this).apply {
-                    text = "${file.name}  ${file.length() / (1024 * 1024)} MB"
+                    val bytes = file.length()
+                    val size = if (bytes < 1024 * 1024) {
+                        "${bytes / 1024} KB"
+                    } else {
+                        "${bytes / (1024 * 1024)} MB"
+                    }
+                    text = "${file.name}  $size"
                     setPadding(24, 20, 24, 20)
                 }, LinearLayout.LayoutParams(0, -2, 1f))
                 if (file.extension == "mp4") {
@@ -543,7 +560,11 @@ class MainActivity : AppCompatActivity() {
             this, "com.vanipy.bidik.fileprovider", file
         )
         val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-            type = if (file.extension == "gif") "image/gif" else "video/mp4"
+            type = when (file.extension) {
+                "gif" -> "image/gif"
+                "csv" -> "text/csv"
+                else -> "video/mp4"
+            }
             putExtra(android.content.Intent.EXTRA_STREAM, uri)
             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
@@ -561,7 +582,14 @@ class MainActivity : AppCompatActivity() {
             this, "com.vanipy.bidik.fileprovider", file
         )
         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, if (file.extension == "gif") "image/gif" else "video/mp4")
+            setDataAndType(
+                uri,
+                when (file.extension) {
+                    "gif" -> "image/gif"
+                    "csv" -> "text/csv"
+                    else -> "video/mp4"
+                }
+            )
             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(android.content.Intent.createChooser(intent, "View recording"))
