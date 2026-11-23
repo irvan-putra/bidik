@@ -121,17 +121,23 @@ def parse_version(argv, fallback=None):
 
 BIDIK_BG = (24, 24, 32, 255)
 BIDIK_LIGHT = (240, 240, 245, 255)
+BIDIK_ACCENT = (232, 161, 61, 255)   # family warm gold, same as simak's star
 BIDIK_STRIP = (44, 44, 56, 255)
 
 
 def bidik_art():
-    """The bidik picture alone: corner brackets plus a lens."""
+    """The bidik picture alone: corner brackets plus a lens, in the accent.
+
+    The reticle is the accent colour, not a gray: the family full-colour rule
+    (patuh icon-fullcolor) needs >= 5% of opaque pixels to be colorful, and a
+    grayscale render fails it.
+    """
     art, d = new_layer()
     w, a, b, t, u, L = int(S * .045), S * .25, S * .75, S * .19, S * .59, S * .11
     for (x, y, sx, sy) in ((a, t, 1, 1), (b, t, -1, 1), (a, u, 1, -1), (b, u, -1, -1)):
-        d.line([(x, y + sy * L), (x, y), (x + sx * L, y)], fill=BIDIK_LIGHT, width=w, joint="curve")
+        d.line([(x, y + sy * L), (x, y), (x + sx * L, y)], fill=BIDIK_ACCENT, width=w, joint="curve")
     cx, cy, r = S / 2, S * .39, S * .12
-    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=BIDIK_LIGHT)
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=BIDIK_ACCENT)
     pr = r * .5
     d.ellipse([cx - pr, cy - pr, cx + pr, cy + pr], fill=BIDIK_BG)
     return art
