@@ -12,15 +12,13 @@ Picture safety: every picture pixel is checked to lie inside the circle that
 touches the icon edges (shrunk by a margin), so round launcher masks do not
 clip it; the version text is checked the same way.
 
-Outputs match the com.vanipy family standard (same geometry as the other
-apps' generators):
-- legacy mipmap PNGs per density: rounded-square icon with the strip.
-- adaptive-icon foreground: the 72dp face (576px) centred on the 108dp
-  layer (864px) with 18dp overscan; the strip spans the full layer width
-  from 76% of the face so launchers that crop the overscan still show it.
-- themed (monochrome) foreground: white silhouette; the numbers are cut
-  out of the strip for contrast.
-- mipmap-anydpi-v26 XML and the background colour resource.
+One icon variant only, the com.vanipy family standard since 2026-11-23:
+a single res/drawable/ic_launcher.png at xxxhdpi-class 192px - the
+rounded-square icon with the strip. Launchers downscale it per density
+themselves. No mipmap ladder, no adaptive-icon XML and no themed
+(monochrome) layer: an adaptive/monochrome layer lets launchers with
+themed icons enabled replace the art with a flat palette glyph, hiding
+the picture. Family icons must always show the full-colour art.
 
 `--check` regenerates everything into a temp dir and fails if any
 committed resource differs, so CI can prove the PNGs came from this
@@ -35,7 +33,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 FONT_VENDORED = os.path.join(ROOT, "tools", "fonts", "DejaVuSans-Bold.ttf")
 FONT_SYSTEM = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_SHA256 = "d1c3ff99f1e1ce1827a33efd4dad81f40babda06bff9e43bd7591c86662a287b"
-DENSITIES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
+ICON_PX = 192  # xxxhdpi-class: the single shipped variant
 S = 768
 STRIP_TOP = 0.76      # strip covers 76%..100% of the icon height
 TEXT_SIZE = 0.115     # numeral size, fraction of icon size
@@ -121,13 +119,6 @@ def parse_version(argv, fallback=None):
     return v
 
 
-def write_densities(img, res_dir, name="ic_launcher.png"):
-    for dens, px in DENSITIES.items():
-        out = os.path.join(res_dir, "mipmap-" + dens)
-        os.makedirs(out, exist_ok=True)
-        img.resize((px, px), Image.LANCZOS).save(os.path.join(out, name), optimize=True)
-
-
 BIDIK_BG = (24, 24, 32, 255)
 BIDIK_LIGHT = (240, 240, 245, 255)
 BIDIK_STRIP = (44, 44, 56, 255)
@@ -150,78 +141,15 @@ def bidik(version):
     return compose(BIDIK_BG, bidik_art(), version, BIDIK_STRIP, BIDIK_LIGHT, rounded=.2)
 
 
-ADAPTIVE_XML = """<?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
-    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
-</adaptive-icon>
-"""
-
-COLORS_XML = """<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="ic_launcher_background">#181820</color>
-</resources>
-"""
-
-
-def bidik_adaptive(version):
-    """Foreground + monochrome layers with the family strip on the face.
-
-    The 72dp face is 576px centred on the 108dp 864px layer (18dp
-    overscan). Strip and text use the same 76%/88%/11.5% face geometry as
-    the legacy icon, so masked and unmasked launchers show the same badge.
-    The themed numbers are cut out of the strip for contrast.
-    """
-    T, F, I = 864, 576, 144
-    art = bidik_art().resize((F, F), Image.LANCZOS)
-    fg, d = new_layer(T)
-    fg.alpha_composite(art, (I, I))
-    y = I + int(F * STRIP_TOP)
-    d.rectangle([0, y, T, T], fill=BIDIK_STRIP)
-    text, td = new_layer(T)
-    td.text((T / 2, I + F * .88), version, font=font(int(F * TEXT_SIZE)),
-            fill=(255, 255, 255, 255), anchor="mm")
-    fg.alpha_composite(text)
-    alpha = Image.new("L", (T, T), 0)
-    alpha.paste(art.getchannel("A"), (I, I))
-    ImageDraw.Draw(alpha).rectangle([0, y, T, T], fill=255)
-    alpha = ImageChops.subtract(alpha, text.getchannel("A"))
-    mono = Image.new("RGBA", (T, T), (255, 255, 255, 255))
-    mono.putalpha(alpha)
-    return fg, mono
-
-
 def write_all(version, res_dir):
-    write_densities(bidik(version), res_dir)
-    fg, mono = bidik_adaptive(version)
-    drawables = os.path.join(res_dir, "drawable-xxxhdpi")
+    drawables = os.path.join(res_dir, "drawable")
     os.makedirs(drawables, exist_ok=True)
-    fg.resize((432, 432), Image.LANCZOS).save(
-        os.path.join(drawables, "ic_launcher_foreground.png"), optimize=True)
-    mono.resize((432, 432), Image.LANCZOS).save(
-        os.path.join(drawables, "ic_launcher_monochrome.png"), optimize=True)
-    anydpi = os.path.join(res_dir, "mipmap-anydpi-v26")
-    os.makedirs(anydpi, exist_ok=True)
-    for name in ("ic_launcher.xml", "ic_launcher_round.xml"):
-        with open(os.path.join(anydpi, name), "w") as fh:
-            fh.write(ADAPTIVE_XML)
-    values = os.path.join(res_dir, "values")
-    os.makedirs(values, exist_ok=True)
-    with open(os.path.join(values, "colors.xml"), "w") as fh:
-        fh.write(COLORS_XML)
+    bidik(version).resize((ICON_PX, ICON_PX), Image.LANCZOS).save(
+        os.path.join(drawables, "ic_launcher.png"), optimize=True)
 
 
 def written_paths(res_dir):
-    paths = [os.path.join("mipmap-" + d, "ic_launcher.png") for d in DENSITIES]
-    paths += [
-        os.path.join("drawable-xxxhdpi", "ic_launcher_foreground.png"),
-        os.path.join("drawable-xxxhdpi", "ic_launcher_monochrome.png"),
-        os.path.join("mipmap-anydpi-v26", "ic_launcher.xml"),
-        os.path.join("mipmap-anydpi-v26", "ic_launcher_round.xml"),
-        os.path.join("values", "colors.xml"),
-    ]
-    return [os.path.join(res_dir, p) for p in paths]
+    return [os.path.join(res_dir, "drawable", "ic_launcher.png")]
 
 
 def check(version, res_dir):
