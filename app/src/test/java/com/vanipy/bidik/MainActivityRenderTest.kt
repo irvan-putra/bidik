@@ -16,7 +16,7 @@ import java.io.FileOutputStream
 /**
  * Renders MainActivity with real Skia (Robolectric native graphics) at
  * phone-width portrait and writes a PNG for pixel inspection - the same
- * no-device verification pattern as intodo's render-check. CI uploads the
+ * no-device verification pattern as tindak's render-check. CI uploads the
  * PNG as a run artifact.
  */
 @RunWith(RobolectricTestRunner::class)

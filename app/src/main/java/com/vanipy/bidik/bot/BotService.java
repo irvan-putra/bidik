@@ -13,7 +13,7 @@ import android.os.IBinder;
  * public builds ship with the transport disabled until the pairing workflow
  * is approved. The chatmail account, when created, is minted
  * by an explicit button in the setup screen (same provisioning pattern as
- * itdapk's bot: dcaccount: relay QR, keys only in the app-private dir).
+ * jin's bot: dcaccount: relay QR, keys only in the app-private dir).
  *
  * The python runtime lives in app/src/main/python/dc_transport.py.
  */
