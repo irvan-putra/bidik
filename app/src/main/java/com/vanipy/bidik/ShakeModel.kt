@@ -99,30 +99,30 @@ internal class ShakeModel {
         private const val REST_ALPHA = 0.002f
 
         /**
-         * Displacement filter, deliberately slow: sub-second jolts are
-         * spread into a gentle swell (the handycam character) instead of
-         * the picture snapping frame to frame.
+         * Displacement filter: slow enough to spread sub-second jolts
+         * into a swell, fast enough that deliberate shakes in the
+         * 1-3 Hz band a hand actually makes come through at strength.
          */
-        private const val DISP_ALPHA = 0.05f
+        private const val DISP_ALPHA = 0.15f
 
-        /** NDC shift per m/s^2 of displacement; ~6.5px/X and ~13px/Y on 432x848. */
-        private const val SHIFT_PER_MS2 = 0.030f
+        /** NDC shift per m/s^2 of displacement; ~11px/X and ~21px/Y on 432x848. */
+        private const val SHIFT_PER_MS2 = 0.05f
 
-        /** Picture shift cap: 3.5% of the half-span, ~15px/X and ~30px/Y on 432x848. */
-        internal const val MAX_SHIFT = 0.07f
+        /** Picture shift cap: 7% of the half-span, ~30px/X and ~59px/Y on 432x848. */
+        internal const val MAX_SHIFT = 0.14f
 
         /** Fraction of phone roll shown as picture roll. */
-        private const val ROT_GAIN = 0.22f
+        private const val ROT_GAIN = 0.8f
 
-        /** Picture roll cap in degrees. */
-        internal const val MAX_ROT_DEG = 3f
+        /** Picture roll cap in degrees; handycam footage rolls visibly. */
+        internal const val MAX_ROT_DEG = 6f
 
         /**
-         * Per-frame chase rate at the fixed 30fps capture cadence, low
-         * on purpose: the picture eases toward its target over ~half a
-         * second, which is what makes motion read as organic sway.
+         * Per-frame chase rate at the fixed 30fps capture cadence:
+         * eased enough that motion reads as sway instead of snapping,
+         * quick enough that a deliberate shake is not muted away.
          */
-        private const val FRAME_LERP = 0.07f
+        private const val FRAME_LERP = 0.22f
 
         /** Zoom pulse per m/s^2 of forward/back jolt. */
         private const val ZOOM_PER_MS2 = 0.004f
