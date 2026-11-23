@@ -20,8 +20,8 @@ env:
   # SET in the release commit: 64 uppercase hex digits of the key certificate. Not a secret.
   EXPECTED_CERT_SHA256: A6DE82B10E4AF1DF5E523DB9DE00136994F3168075E3FBDA6FFF7E551F04A722
   # SET per release in the release commit: must equal the gradle defaults, tools/icon-version.txt and the icon badge.
-  EXPECTED_VERSION_NAME: '0.1.7'
-  EXPECTED_VERSION_CODE: '8'
+  EXPECTED_VERSION_NAME: '0.1.8'
+  EXPECTED_VERSION_CODE: '9'
   EXPECTED_PACKAGE: com.vanipy.bidik
   EXPECTED_LABEL: bidik
   BUILD_TOOLS_VERSION: 34.0.0
