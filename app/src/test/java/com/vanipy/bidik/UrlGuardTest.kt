@@ -8,7 +8,7 @@ class UrlGuardTest {
 
     @Test
     fun allowsPublicHttpPages() {
-        assertTrue(UrlGuard.isAllowed("https://example.com/vana/"))
+        assertTrue(UrlGuard.isAllowed("https://example.com/bedah/"))
         assertTrue(UrlGuard.isAllowed("http://example.com/"))
         assertTrue(UrlGuard.isAllowed("https://sub.example.co.id:8443/p?q=1"))
     }
