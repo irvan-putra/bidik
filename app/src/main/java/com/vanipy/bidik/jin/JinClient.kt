@@ -170,12 +170,21 @@ class JinClient(private val provider: JinProviderCalls) {
             } catch (e: JinException) {
                 // The provider's retry path does not await the drain's EOF
                 // marker, so an immediate same-token re-stage + commit can
-                // report EXPIRED while the bytes are still landing. One
-                // bounded commit retry absorbs that race; a second EXPIRED
-                // is real and surfaces.
+                // report EXPIRED while the bytes are still landing. Bounded
+                // backoff retries absorb that race even on a busy device;
+                // a persistent EXPIRED is real and surfaces.
                 if (e.code != JinContract.E_EXPIRED) throw e
-                Thread.sleep(300)
-                return commit(token, meta)
+                var last = e
+                for (waitMs in longArrayOf(300L, 600L, 1_200L)) {
+                    Thread.sleep(waitMs)
+                    try {
+                        return commit(token, meta)
+                    } catch (again: JinException) {
+                        if (again.code != JinContract.E_EXPIRED) throw again
+                        last = again
+                    }
+                }
+                throw last
             }
         } catch (e: Exception) {
             try {
