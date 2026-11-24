@@ -147,3 +147,7 @@ followed by a run summary. See `QueueProtocol.kt` for the exact shape.
 
 - [Capturing how a web page looks on a phone, from an app](docs/research/webview-vs-mediaprojection.md) - compares app WebView rendering with Android screen capture; no device-specific measurements.
 - [Recording the screen from an app: MediaProjection](docs/research/screen-recording-mediaprojection.md) - consent, foreground-service and encoding requirements behind the screen recorder; no device-specific measurements.
+
+---
+
+Built with AI assistance (Instinct and others). Not everything has been reviewed by Irvan.
